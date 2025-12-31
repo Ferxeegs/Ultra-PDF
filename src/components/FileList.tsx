@@ -12,12 +12,16 @@ interface FileListProps {
   fileObjects: FileObject[];
   onDragEnd: (event: DragEndEvent) => void;
   onRemove: (id: string) => void;
+  isProcessing?: boolean;
+  currentFileIndex?: number | null;
 }
 
 export default function FileList({
   fileObjects,
   onDragEnd,
   onRemove,
+  isProcessing = false,
+  currentFileIndex = null,
 }: FileListProps) {
   return (
     <div className="p-6">
@@ -70,6 +74,8 @@ export default function FileList({
                   fileObj={obj}
                   index={index}
                   onRemove={onRemove}
+                  isProcessing={isProcessing}
+                  isCurrentFile={currentFileIndex === index}
                 />
               ))}
             </SortableContext>

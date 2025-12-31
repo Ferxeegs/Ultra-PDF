@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Loader2, ShieldCheck, Zap, Lock, MousePointer2 } from "lucide-react";
 import {
   KeyboardSensor,
@@ -23,7 +23,19 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [downloadFileName, setDownloadFileName] = useState("pdf-merged");
 
-  const { isProcessing, progress, downloadUrl, mergeFiles, reset } = usePdfWorker();
+  const { isProcessing, progress, downloadUrl, currentFile, fileErrors, mergeFiles, reset } = usePdfWorker();
+
+  // Sync file errors dari worker ke fileObjects state
+  useEffect(() => {
+    if (fileErrors.length > 0) {
+      setFileObjects((prev) =>
+        prev.map((obj) => {
+          const error = fileErrors.find((e) => e.fileId === obj.id);
+          return error ? { ...obj, error: error.error } : obj;
+        })
+      );
+    }
+  }, [fileErrors]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -55,8 +67,18 @@ export default function Home() {
 
   const handleMerge = async () => {
     if (fileObjects.length < 2) return;
-    const files = fileObjects.map((obj) => obj.file);
-    await mergeFiles(files);
+    // Reset error state pada file objects
+    setFileObjects((prev) => prev.map((obj) => ({ ...obj, error: undefined, isProcessing: false })));
+    // Update processing state untuk file yang sedang diproses
+    if (currentFile) {
+      setFileObjects((prev) =>
+        prev.map((obj, index) => ({
+          ...obj,
+          isProcessing: index === currentFile.current - 1,
+        }))
+      );
+    }
+    await mergeFiles(fileObjects);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -69,6 +91,22 @@ export default function Home() {
       });
     }
   };
+
+  // Update processing state berdasarkan currentFile
+  useEffect(() => {
+    if (isProcessing && currentFile) {
+      setFileObjects((prev) =>
+        prev.map((obj, index) => ({
+          ...obj,
+          isProcessing: index === currentFile.current - 1,
+        }))
+      );
+    } else if (!isProcessing) {
+      setFileObjects((prev) =>
+        prev.map((obj) => ({ ...obj, isProcessing: false }))
+      );
+    }
+  }, [isProcessing, currentFile]);
 
   return (
     <main className="min-h-screen bg-[#FDFDFF] relative py-16 px-4 sm:px-6">
@@ -131,6 +169,8 @@ export default function Home() {
               fileObjects={fileObjects}
               onDragEnd={handleDragEnd}
               onRemove={(id) => setFileObjects(prev => prev.filter(o => o.id !== id))}
+              isProcessing={isProcessing}
+              currentFileIndex={currentFile ? currentFile.current - 1 : null}
             />
           </div>
 
@@ -139,6 +179,27 @@ export default function Home() {
             {isProcessing && (
               <div className="mb-8">
                 <ProgressBar progress={progress} />
+                {currentFile && (
+                  <p className="text-xs text-slate-500 mt-2 text-center">
+                    Memproses file {currentFile.current} dari {currentFile.total}
+                  </p>
+                )}
+              </div>
+            )}
+            
+            {/* Error Messages */}
+            {fileErrors.length > 0 && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                <h4 className="text-sm font-semibold text-red-800 mb-2">
+                  {fileErrors.length} file memiliki error:
+                </h4>
+                <ul className="space-y-1">
+                  {fileErrors.map((error) => (
+                    <li key={error.fileId} className="text-xs text-red-700">
+                      • <span className="font-medium">{error.fileName}</span>: {error.error}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
