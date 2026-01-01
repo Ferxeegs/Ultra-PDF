@@ -91,13 +91,13 @@ export default function PdfThumbnail({
   return (
     <div className="relative group">
       <div 
-        className="relative w-full h-48 bg-slate-100 rounded-xl overflow-hidden border-2 border-slate-200 flex items-center justify-center cursor-pointer transition-all hover:border-blue-400 hover:shadow-md"
+        className="relative w-full h-48 bg-slate-100 dark:bg-slate-800 rounded-xl overflow-hidden border-2 border-slate-200 dark:border-slate-700 flex items-center justify-center cursor-pointer transition-all hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md"
         onClick={onPreviewClick}
       >
         {isLoading ? (
           <div className="text-center">
-            <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-            <p className="text-xs text-slate-500">Memuat thumbnail...</p>
+            <div className="w-8 h-8 border-3 border-blue-500 dark:border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Memuat thumbnail...</p>
           </div>
         ) : useIframeFallback ? (
           <>
@@ -110,7 +110,7 @@ export default function PdfThumbnail({
             {/* Overlay with preview button */}
             {showPreviewButton && (
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                <div className="px-4 py-2 bg-white text-slate-900 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-lg">
+                <div className="px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-lg">
                   <Eye size={16} />
                   Lihat Pratinjau
                 </div>
@@ -127,7 +127,7 @@ export default function PdfThumbnail({
             {/* Overlay with preview button */}
             {showPreviewButton && (
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                <div className="px-4 py-2 bg-white text-slate-900 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-lg">
+                <div className="px-4 py-2 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-lg">
                   <Eye size={16} />
                   Lihat Pratinjau
                 </div>
@@ -136,15 +136,15 @@ export default function PdfThumbnail({
           </>
         ) : (
           <div className="text-center p-4">
-            <FileText className="w-12 h-12 text-slate-400 mx-auto mb-2" />
-            <p className="text-xs text-slate-500">Gagal memuat thumbnail</p>
+            <FileText className="w-12 h-12 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
+            <p className="text-xs text-slate-500 dark:text-slate-400">Gagal memuat thumbnail</p>
             {showPreviewButton && onPreviewClick && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onPreviewClick();
                 }}
-                className="mt-3 px-3 py-1.5 bg-blue-500 text-white rounded-md text-xs font-semibold hover:bg-blue-600 transition-colors"
+                className="mt-3 px-3 py-1.5 bg-blue-500 dark:bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-600 dark:hover:bg-blue-700 transition-colors"
               >
                 Lihat Pratinjau
               </button>
@@ -153,7 +153,7 @@ export default function PdfThumbnail({
         )}
       </div>
       {fileName && (
-        <p className="text-xs text-slate-500 mt-2 text-center truncate">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center truncate">
           {fileName}
         </p>
       )}

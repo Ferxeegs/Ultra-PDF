@@ -63,31 +63,31 @@ export default function CompressPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#FDFDFF] relative py-16 px-4 sm:px-6">
+    <main className="min-h-screen bg-[#FDFDFF] dark:bg-slate-900 relative py-16 px-4 sm:px-6 transition-colors duration-200">
       {/* Abstract Background Decoration */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-100/50 rounded-full blur-[120px]" />
-        <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] bg-indigo-100/40 rounded-full blur-[100px]" />
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-100/50 dark:bg-blue-900/20 rounded-full blur-[120px]" />
+        <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] bg-indigo-100/40 dark:bg-indigo-900/20 rounded-full blur-[100px]" />
       </div>
 
       <div className="max-w-3xl mx-auto relative z-10">
         {/* Branding & Header */}
         <header className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-xs font-bold uppercase tracking-wider mb-6 shadow-sm">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-100 dark:border-blue-800 text-blue-600 dark:text-blue-400 text-xs font-bold uppercase tracking-wider mb-6 shadow-sm">
             <ShieldCheck size={14} />
             <span>Server-Side Processing</span>
           </div>
-          <h1 className="text-5xl font-black text-slate-900 tracking-tight mb-4">
-            Compress <span className="text-blue-600">PDF</span>
+          <h1 className="text-5xl font-black text-slate-900 dark:text-slate-100 tracking-tight mb-4">
+            Compress <span className="text-blue-600 dark:text-blue-400">PDF</span>
           </h1>
-          <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-xl mx-auto">
+          <p className="text-slate-500 dark:text-slate-400 text-lg font-medium leading-relaxed max-w-xl mx-auto">
             Kompres ukuran file PDF Anda tanpa mengurangi kualitas. 
             Cepat, aman, dan diproses menggunakan Ghostscript di server.
           </p>
         </header>
 
         {/* Main Application Interface */}
-        <div className="bg-white rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-100 overflow-hidden transition-all duration-500">
+        <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-700 overflow-hidden transition-all duration-500">
           
           {/* Section: Upload */}
           {!fileObject && (
@@ -115,28 +115,28 @@ export default function CompressPage() {
             <>
               <div className="px-8 pt-8 pb-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-2">
                     <FileText size={16} />
                     File yang Dipilih
                   </h3>
                   <button
                     onClick={() => setFileObject(null)}
-                    className="text-xs font-semibold text-red-400 hover:text-red-500 transition-colors"
+                    className="text-xs font-semibold text-red-400 dark:text-red-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   >
                     Hapus
                   </button>
                 </div>
                 
-                <div className="bg-slate-50 rounded-xl p-4 mb-6">
+                <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4 mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-blue-600" />
+                    <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
                         {fileObject.file.name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
                         {(fileObject.file.size / 1024 / 1024).toFixed(2)} MB
                       </p>
                     </div>
@@ -146,15 +146,15 @@ export default function CompressPage() {
                 {/* Compression Settings */}
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-4">
-                    <Settings size={16} className="text-slate-400" />
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">
+                    <Settings size={16} className="text-slate-400 dark:text-slate-500" />
+                    <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                       Pengaturan Kompresi
                     </h3>
                   </div>
                   
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-3">
+                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
                         Pilih Kualitas Kompresi
                       </label>
                       
@@ -165,18 +165,18 @@ export default function CompressPage() {
                           onClick={() => setQuality("low")}
                           className={`p-4 rounded-xl border-2 transition-all ${
                             quality === "low"
-                              ? "border-blue-500 bg-blue-50 shadow-md"
-                              : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
+                              ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/30 shadow-md"
+                              : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/20"
                           }`}
                         >
                           <div className="text-center">
                             <div className={`text-lg font-bold mb-1 ${
-                              quality === "low" ? "text-blue-600" : "text-slate-700"
+                              quality === "low" ? "text-blue-600 dark:text-blue-400" : "text-slate-700 dark:text-slate-300"
                             }`}>
                               Low
                             </div>
-                            <div className="text-xs text-slate-500 mb-2">72 dpi</div>
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">72 dpi</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">
                               Ukuran terkecil
                             </div>
                           </div>
@@ -188,18 +188,18 @@ export default function CompressPage() {
                           onClick={() => setQuality("medium")}
                           className={`p-4 rounded-xl border-2 transition-all ${
                             quality === "medium"
-                              ? "border-blue-500 bg-blue-50 shadow-md"
-                              : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
+                              ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/30 shadow-md"
+                              : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/20"
                           }`}
                         >
                           <div className="text-center">
                             <div className={`text-lg font-bold mb-1 ${
-                              quality === "medium" ? "text-blue-600" : "text-slate-700"
+                              quality === "medium" ? "text-blue-600 dark:text-blue-400" : "text-slate-700 dark:text-slate-300"
                             }`}>
                               Medium
                             </div>
-                            <div className="text-xs text-slate-500 mb-2">150 dpi</div>
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">150 dpi</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">
                               Seimbang
                             </div>
                           </div>
@@ -211,28 +211,28 @@ export default function CompressPage() {
                           onClick={() => setQuality("high")}
                           className={`p-4 rounded-xl border-2 transition-all ${
                             quality === "high"
-                              ? "border-blue-500 bg-blue-50 shadow-md"
-                              : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50"
+                              ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/30 shadow-md"
+                              : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/20"
                           }`}
                         >
                           <div className="text-center">
                             <div className={`text-lg font-bold mb-1 ${
-                              quality === "high" ? "text-blue-600" : "text-slate-700"
+                              quality === "high" ? "text-blue-600 dark:text-blue-400" : "text-slate-700 dark:text-slate-300"
                             }`}>
                               High
                             </div>
-                            <div className="text-xs text-slate-500 mb-2">300 dpi</div>
-                            <div className="text-xs text-slate-400">
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">300 dpi</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">
                               Kualitas tinggi
                             </div>
                           </div>
                         </button>
                       </div>
 
-                      <p className="text-xs text-slate-400 mt-3">
-                        <span className="font-semibold text-slate-600">Low:</span> Kompresi maksimal, ukuran file terkecil. 
-                        <span className="font-semibold text-slate-600 ml-2">Medium:</span> Keseimbangan ukuran dan kualitas. 
-                        <span className="font-semibold text-slate-600 ml-2">High:</span> Kualitas tinggi dengan kompresi ringan.
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-3">
+                        <span className="font-semibold text-slate-600 dark:text-slate-400">Low:</span> Kompresi maksimal, ukuran file terkecil. 
+                        <span className="font-semibold text-slate-600 dark:text-slate-400 ml-2">Medium:</span> Keseimbangan ukuran dan kualitas. 
+                        <span className="font-semibold text-slate-600 dark:text-slate-400 ml-2">High:</span> Kualitas tinggi dengan kompresi ringan.
                       </p>
                     </div>
                   </div>
@@ -240,7 +240,7 @@ export default function CompressPage() {
               </div>
 
               {/* Section: Execution & Progress */}
-              <div className="p-8 bg-slate-50/50 border-t border-slate-100">
+              <div className="p-8 bg-slate-50/50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
                 {isProcessing && (
                   <div className="mb-8">
                     <ProgressBar 
@@ -252,11 +252,11 @@ export default function CompressPage() {
                 
                 {/* Error Messages */}
                 {fileError && (
-                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
-                    <h4 className="text-sm font-semibold text-red-800 mb-1">
+                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                    <h4 className="text-sm font-semibold text-red-800 dark:text-red-300 mb-1">
                       Error:
                     </h4>
-                    <p className="text-xs text-red-700">{fileError}</p>
+                    <p className="text-xs text-red-700 dark:text-red-400">{fileError}</p>
                   </div>
                 )}
 
@@ -264,7 +264,7 @@ export default function CompressPage() {
                   <button
                     onClick={handleCompress}
                     disabled={isProcessing || !fileObject}
-                    className="group relative w-full py-5 bg-slate-900 text-white rounded-2xl font-bold overflow-hidden transition-all hover:bg-blue-600 disabled:bg-slate-200 disabled:text-slate-400 active:scale-[0.98] shadow-xl hover:shadow-blue-200 disabled:shadow-none"
+                    className="group relative w-full py-5 bg-slate-900 dark:bg-slate-700 text-white rounded-2xl font-bold overflow-hidden transition-all hover:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-slate-200 dark:disabled:bg-slate-700 disabled:text-slate-400 dark:disabled:text-slate-500 active:scale-[0.98] shadow-xl hover:shadow-blue-200 dark:hover:shadow-blue-900/50 disabled:shadow-none"
                   >
                     <div className="relative z-10 flex items-center justify-center gap-3">
                       {isProcessing ? (
@@ -310,34 +310,34 @@ export default function CompressPage() {
         {/* Feature Highlights Footer */}
         <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8">
           <div className="flex flex-col items-center text-center group">
-            <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-blue-500 mb-4 group-hover:scale-110 transition-transform">
+            <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center text-blue-500 dark:text-blue-400 mb-4 group-hover:scale-110 transition-transform">
               <ShieldCheck size={20} />
             </div>
-            <h4 className="text-sm font-bold text-slate-800 mb-1">Ghostscript Powered</h4>
-            <p className="text-xs text-slate-400 leading-relaxed">Menggunakan Ghostscript untuk kompresi PDF profesional dengan kualitas terjamin.</p>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Ghostscript Powered</h4>
+            <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">Menggunakan Ghostscript untuk kompresi PDF profesional dengan kualitas terjamin.</p>
           </div>
           
           <div className="flex flex-col items-center text-center group">
-            <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-blue-500 mb-4 group-hover:scale-110 transition-transform">
+            <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center text-blue-500 dark:text-blue-400 mb-4 group-hover:scale-110 transition-transform">
               <Zap size={20} />
             </div>
-            <h4 className="text-sm font-bold text-slate-800 mb-1">Optimasi Cerdas</h4>
-            <p className="text-xs text-slate-400 leading-relaxed">Tiga level kualitas: Low (72 dpi), Medium (150 dpi), High (300 dpi) untuk hasil optimal.</p>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Optimasi Cerdas</h4>
+            <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">Tiga level kualitas: Low (72 dpi), Medium (150 dpi), High (300 dpi) untuk hasil optimal.</p>
           </div>
           
           <div className="flex flex-col items-center text-center group">
-            <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-blue-500 mb-4 group-hover:scale-110 transition-transform">
+            <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center text-blue-500 dark:text-blue-400 mb-4 group-hover:scale-110 transition-transform">
               <Settings size={20} />
             </div>
-            <h4 className="text-sm font-bold text-slate-800 mb-1">Kontrol Penuh</h4>
-            <p className="text-xs text-slate-400 leading-relaxed">Pilih tingkat kompresi sesuai kebutuhan Anda dengan kontrol yang mudah.</p>
+            <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1">Kontrol Penuh</h4>
+            <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">Pilih tingkat kompresi sesuai kebutuhan Anda dengan kontrol yang mudah.</p>
           </div>
         </div>
 
         {/* Footer */}
-        <footer className="mt-16 pt-8 border-t border-slate-200">
+        <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-700">
           <div className="text-center">
-            <p className="text-sm text-slate-500 font-medium">
+            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
               © 2025 Ferxcode | All Rights Reserved
             </p>
           </div>

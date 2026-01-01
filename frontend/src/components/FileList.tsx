@@ -26,10 +26,10 @@ export default function FileList({
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+        <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
           Daftar File
         </h2>
-        <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
+        <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-full">
           {fileObjects.length} {fileObjects.length === 1 ? "file" : "files"}
         </span>
       </div>
@@ -41,9 +41,9 @@ export default function FileList({
         <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
           {fileObjects.length === 0 ? (
             <div className="text-center py-16">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 mb-4">
                 <svg
-                  className="w-8 h-8 text-slate-400"
+                  className="w-8 h-8 text-slate-400 dark:text-slate-500"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -56,10 +56,10 @@ export default function FileList({
                   />
                 </svg>
               </div>
-              <p className="text-slate-400 text-sm font-medium">
+              <p className="text-slate-400 dark:text-slate-500 text-sm font-medium">
                 Belum ada file
               </p>
-              <p className="text-slate-300 text-xs mt-1">
+              <p className="text-slate-300 dark:text-slate-600 text-xs mt-1">
                 Silakan upload file PDF terlebih dahulu
               </p>
             </div>

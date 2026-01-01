@@ -48,14 +48,14 @@ export default function SortableFileItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center justify-between p-4 bg-white rounded-xl border transition-all duration-200 ${
+      className={`flex items-center justify-between p-4 bg-white dark:bg-slate-700 rounded-xl border transition-all duration-200 ${
         isDragging
-          ? "border-blue-500 shadow-xl ring-2 ring-blue-200 bg-blue-50/50 scale-[1.02]"
+          ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200 dark:ring-blue-800 bg-blue-50/50 dark:bg-blue-900/30 scale-[1.02]"
           : hasError
-          ? "border-red-300 bg-red-50/30"
+          ? "border-red-300 dark:border-red-700 bg-red-50/30 dark:bg-red-900/20"
           : isProcessingFile
-          ? "border-blue-400 bg-blue-50/50 ring-2 ring-blue-200"
-          : "border-slate-200 hover:border-blue-300 hover:shadow-md"
+          ? "border-blue-400 dark:border-blue-500 bg-blue-50/50 dark:bg-blue-900/30 ring-2 ring-blue-200 dark:ring-blue-800"
+          : "border-slate-200 dark:border-slate-600 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-md"
       } group`}
     >
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -65,7 +65,7 @@ export default function SortableFileItem({
           {...listeners}
           className={`${
             isProcessing ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing"
-          } text-slate-300 hover:text-blue-500 transition-colors flex-shrink-0`}
+          } text-slate-300 dark:text-slate-600 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex-shrink-0`}
         >
           <GripVertical size={20} />
         </div>
@@ -74,10 +74,10 @@ export default function SortableFileItem({
         <div
           className={`p-2.5 rounded-lg flex-shrink-0 ${
             hasError
-              ? "bg-red-100 text-red-600"
+              ? "bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400"
               : isProcessingFile
-              ? "bg-blue-100 text-blue-600"
-              : "bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-600"
+              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+              : "bg-gradient-to-br from-blue-50 dark:from-blue-900/30 to-indigo-50 dark:to-indigo-900/30 text-blue-600 dark:text-blue-400"
           }`}
         >
           {hasError ? (
@@ -91,20 +91,20 @@ export default function SortableFileItem({
 
         {/* File Info */}
         <div className="flex flex-col min-w-0 flex-1">
-          <span className="text-sm font-semibold text-slate-800 truncate">
+          <span className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
             {fileObj.file.name}
           </span>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
               {formatFileSize(fileObj.file.size)}
             </span>
             {hasError && (
-              <span className="text-xs text-red-600 font-medium truncate">
+              <span className="text-xs text-red-600 dark:text-red-400 font-medium truncate">
                 • {fileObj.error}
               </span>
             )}
             {isProcessingFile && (
-              <span className="text-xs text-blue-600 font-medium">
+              <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
                 • Memproses...
               </span>
             )}
@@ -115,10 +115,10 @@ export default function SortableFileItem({
         <div
           className={`px-2.5 py-1 text-xs font-bold rounded-full flex-shrink-0 ${
             hasError
-              ? "bg-red-100 text-red-700"
+              ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
               : isProcessingFile
-              ? "bg-blue-100 text-blue-700"
-              : "bg-slate-100 text-slate-600"
+              ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+              : "bg-slate-100 dark:bg-slate-600 text-slate-600 dark:text-slate-300"
           }`}
         >
           #{index + 1}
@@ -131,8 +131,8 @@ export default function SortableFileItem({
         disabled={isProcessing}
         className={`ml-3 p-2 rounded-lg transition-all duration-200 flex-shrink-0 ${
           isProcessing
-            ? "text-slate-300 cursor-not-allowed"
-            : "text-slate-400 hover:text-red-500 hover:bg-red-50"
+            ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+            : "text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
         }`}
         aria-label="Hapus file"
       >
