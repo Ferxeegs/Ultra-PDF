@@ -124,7 +124,7 @@ export default function Home() {
             <span>Secure & Local Processing</span>
           </div>
           <h1 className="text-5xl font-black text-slate-900 tracking-tight mb-4">
-            Ultra<span className="text-blue-600">PDF</span>
+            Merge <span className="text-blue-600">PDF</span>
           </h1>
           <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-xl mx-auto">
             Gabungkan dokumen PDF secara instan tanpa mengunggah file ke server. 

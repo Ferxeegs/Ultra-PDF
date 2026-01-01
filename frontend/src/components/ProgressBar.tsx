@@ -2,15 +2,16 @@
 
 interface ProgressBarProps {
   progress: number;
+  label?: string; // Optional label, default untuk merge PDF
 }
 
-export default function ProgressBar({ progress }: ProgressBarProps) {
+export default function ProgressBar({ progress, label = "MENGGABUNGKAN FILE..." }: ProgressBarProps) {
   return (
     <div className="mb-6">
       <div className="flex justify-between items-center text-xs font-bold text-blue-600 mb-3">
         <span className="flex items-center gap-2">
           <span className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></span>
-          MENGGABUNGKAN FILE...
+          {label}
         </span>
         <span className="px-2.5 py-1 bg-blue-100 rounded-full">
           {progress}%

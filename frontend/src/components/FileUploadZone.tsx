@@ -9,6 +9,9 @@ interface FileUploadZoneProps {
   onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  multiple?: boolean;
+  label?: string;
+  subLabel?: string;
 }
 
 export default function FileUploadZone({
@@ -17,6 +20,9 @@ export default function FileUploadZone({
   onDragLeave,
   onDrop,
   onFileChange,
+  multiple = true,
+  label,
+  subLabel,
 }: FileUploadZoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,17 +65,17 @@ export default function FileUploadZone({
               >
                 {isDragging
                   ? "Lepaskan file di sini"
-                  : "Tarik dan lepas file PDF di sini"}
+                  : label || (multiple ? "Tarik dan lepas file PDF di sini" : "Tarik dan lepas file PDF di sini")}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                atau klik untuk memilih file
+                {subLabel || "atau klik untuk memilih file"}
               </p>
             </div>
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            multiple
+            multiple={multiple}
             accept=".pdf"
             className="hidden"
             onChange={onFileChange}
