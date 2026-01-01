@@ -11,6 +11,8 @@ export function useCompressWorker() {
   const [progressMessage, setProgressMessage] = useState<string>("");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [originalSize, setOriginalSize] = useState<number | null>(null);
+  const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const compressFile = async (
@@ -21,6 +23,8 @@ export function useCompressWorker() {
     setProgress(0);
     setDownloadUrl(null);
     setFileError(null);
+    setOriginalSize(fileObject.file.size);
+    setCompressedSize(null);
     setProgressMessage("Mempersiapkan file untuk diupload...");
 
     // Create abort controller for cancellation
@@ -113,6 +117,9 @@ export function useCompressWorker() {
         }
       }
 
+      // Store compressed size
+      setCompressedSize(blob.size);
+
       // Create download URL
       const downloadUrlString = URL.createObjectURL(blob);
       setDownloadUrl(downloadUrlString);
@@ -159,6 +166,8 @@ export function useCompressWorker() {
     setIsProcessing(false);
     setFileError(null);
     setProgressMessage("");
+    setOriginalSize(null);
+    setCompressedSize(null);
   }, [downloadUrl]);
 
   return {
@@ -167,6 +176,8 @@ export function useCompressWorker() {
     progressMessage,
     downloadUrl,
     fileError,
+    originalSize,
+    compressedSize,
     compressFile,
     reset,
   };

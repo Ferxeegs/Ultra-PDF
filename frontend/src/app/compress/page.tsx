@@ -21,6 +21,8 @@ export default function CompressPage() {
     progressMessage,
     downloadUrl,
     fileError,
+    originalSize,
+    compressedSize,
     compressFile,
     reset,
   } = useCompressWorker();
@@ -281,6 +283,9 @@ export default function CompressPage() {
                     fileName={downloadFileName}
                     onFileNameChange={setDownloadFileName}
                     onReset={handleReset}
+                    originalSize={originalSize}
+                    compressedSize={compressedSize}
+                    defaultFileName="pdf-compressed"
                   />
                 )}
               </div>
@@ -295,6 +300,8 @@ export default function CompressPage() {
                 fileName={downloadFileName}
                 onFileNameChange={setDownloadFileName}
                 onReset={handleReset}
+                originalSize={originalSize}
+                compressedSize={compressedSize}
               />
             </div>
           )}

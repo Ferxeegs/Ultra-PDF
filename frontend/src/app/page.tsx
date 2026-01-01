@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, ShieldCheck, Zap, Lock, MousePointer2 } from "lucide-react";
 import {
   KeyboardSensor,
@@ -13,7 +13,7 @@ import { sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 
 import { usePdfWorker } from "@/hooks/usePdfWorker";
 import { FileObject } from "@/types";
-import FileUploadZone from "@/components/FileUploadZone";
+import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
 import FileList from "@/components/FileList";
 import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
@@ -22,6 +22,7 @@ export default function Home() {
   const [fileObjects, setFileObjects] = useState<FileObject[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [downloadFileName, setDownloadFileName] = useState("pdf-merged");
+  const fileUploadZoneRef = useRef<FileUploadZoneRef>(null);
 
   const { isProcessing, progress, downloadUrl, currentFile, fileErrors, mergeFiles, reset } = usePdfWorker();
 
@@ -138,6 +139,7 @@ export default function Home() {
           {/* Section: Upload */}
           <div className="p-2">
             <FileUploadZone
+              ref={fileUploadZoneRef}
               isDragging={isDragging}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
@@ -157,7 +159,10 @@ export default function Home() {
               </h3>
               {fileObjects.length > 0 && (
                  <button 
-                  onClick={() => setFileObjects([])} 
+                  onClick={() => {
+                    setFileObjects([]);
+                    fileUploadZoneRef.current?.reset();
+                  }} 
                   className="text-xs font-semibold text-red-400 hover:text-red-500 transition-colors"
                 >
                   Hapus Semua
@@ -225,7 +230,11 @@ export default function Home() {
                 downloadUrl={downloadUrl}
                 fileName={downloadFileName}
                 onFileNameChange={setDownloadFileName}
-                onReset={() => { setFileObjects([]); reset(); }}
+                onReset={() => { 
+                  setFileObjects([]); 
+                  reset();
+                  fileUploadZoneRef.current?.reset();
+                }}
               />
             )}
           </div>
@@ -245,8 +254,8 @@ export default function Home() {
             <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-blue-500 mb-4 group-hover:scale-110 transition-transform">
               <Zap size={20} />
             </div>
-            <h4 className="text-sm font-bold text-slate-800 mb-1">Performa Tinggi</h4>
-            <p className="text-xs text-slate-400 leading-relaxed">Menggunakan WebAssembly untuk kecepatan pemrosesan maksimal.</p>
+            <h4 className="text-sm font-bold text-slate-800 mb-1">Performa Optimal</h4>
+            <p className="text-xs text-slate-400 leading-relaxed">Diproses langsung di browser dengan teknologi modern. Performa tergantung pada kemampuan device Anda.</p>
           </div>
 
           <div className="flex flex-col items-center text-center group">

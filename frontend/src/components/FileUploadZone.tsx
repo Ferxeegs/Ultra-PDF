@@ -1,7 +1,7 @@
 "use client";
 
 import { FilePlus } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useImperativeHandle, forwardRef } from "react";
 
 interface FileUploadZoneProps {
   isDragging: boolean;
@@ -14,7 +14,11 @@ interface FileUploadZoneProps {
   subLabel?: string;
 }
 
-export default function FileUploadZone({
+export interface FileUploadZoneRef {
+  reset: () => void;
+}
+
+const FileUploadZone = forwardRef<FileUploadZoneRef, FileUploadZoneProps>(({
   isDragging,
   onDragOver,
   onDragLeave,
@@ -23,8 +27,16 @@ export default function FileUploadZone({
   multiple = true,
   label,
   subLabel,
-}: FileUploadZoneProps) {
+}, ref) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    reset: () => {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    },
+  }));
 
   return (
     <div className="p-8 border-b border-slate-100">
@@ -84,5 +96,9 @@ export default function FileUploadZone({
       </div>
     </div>
   );
-}
+});
+
+FileUploadZone.displayName = "FileUploadZone";
+
+export default FileUploadZone;
 
