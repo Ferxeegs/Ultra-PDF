@@ -15,6 +15,7 @@ export default function SettingsPage() {
     const [indexedDBFiles, setIndexedDBFiles] = useState<FileInfo[]>([]);
     const [indexedDBSize, setIndexedDBSize] = useState<number>(0);
     const [sessionStorageSize, setSessionStorageSize] = useState<number>(0);
+    const [sessionStorageItemCount, setSessionStorageItemCount] = useState<number>(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isClearing, setIsClearing] = useState(false);
     const [clearStatus, setClearStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -58,18 +59,26 @@ export default function SettingsPage() {
             const totalSize = await indexedDBManager.getTotalSize();
             setIndexedDBSize(totalSize);
 
-            // Calculate sessionStorage size
-            let sessionSize = 0;
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key) {
-                    const value = sessionStorage.getItem(key);
-                    if (value) {
-                        sessionSize += key.length + value.length;
+            // Calculate sessionStorage size (only in browser)
+            if (typeof window !== 'undefined' && window.sessionStorage) {
+                let sessionSize = 0;
+                let itemCount = 0;
+                for (let i = 0; i < sessionStorage.length; i++) {
+                    const key = sessionStorage.key(i);
+                    if (key) {
+                        itemCount++;
+                        const value = sessionStorage.getItem(key);
+                        if (value) {
+                            sessionSize += key.length + value.length;
+                        }
                     }
                 }
+                setSessionStorageSize(sessionSize);
+                setSessionStorageItemCount(itemCount);
+            } else {
+                setSessionStorageSize(0);
+                setSessionStorageItemCount(0);
             }
-            setSessionStorageSize(sessionSize);
         } catch (error) {
             console.error("Error loading data:", error);
             setClearStatus({
@@ -120,12 +129,19 @@ export default function SettingsPage() {
         setIsClearing(true);
         setClearStatus(null);
         try {
-            sessionStorage.clear();
-            await loadData();
-            setClearStatus({
-                type: "success",
-                message: "Semua data di SessionStorage berhasil dihapus.",
-            });
+            if (typeof window !== 'undefined' && window.sessionStorage) {
+                sessionStorage.clear();
+                await loadData();
+                setClearStatus({
+                    type: "success",
+                    message: "Semua data di SessionStorage berhasil dihapus.",
+                });
+            } else {
+                setClearStatus({
+                    type: "error",
+                    message: "SessionStorage tidak tersedia.",
+                });
+            }
         } catch (error) {
             console.error("Error clearing sessionStorage:", error);
             setClearStatus({
@@ -271,7 +287,7 @@ export default function SettingsPage() {
                                 <div>
                                     <h3 className="font-bold text-slate-900 dark:text-slate-100">SessionStorage</h3>
                                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        {sessionStorage.length} item
+                                        {sessionStorageItemCount} item
                                     </p>
                                 </div>
                             </div>
@@ -283,7 +299,7 @@ export default function SettingsPage() {
                         </div>
                         <button
                             onClick={handleClearSessionStorage}
-                            disabled={isClearing || sessionStorage.length === 0}
+                            disabled={isClearing || sessionStorageItemCount === 0}
                             className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2"
                         >
                             <Trash2 size={16} />

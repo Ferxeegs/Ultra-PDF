@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Trash2, GripVertical, AlertCircle, Loader2, CheckCircle2 } from "lucide-react";
+import { FileText, Trash2, GripVertical, AlertCircle, Loader2, Eye } from "lucide-react"; // Tambahkan Eye
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FileObject } from "@/types";
@@ -9,6 +9,7 @@ interface SortableFileItemProps {
   fileObj: FileObject;
   index: number;
   onRemove: (id: string) => void;
+  onPreview: () => void; // Tambahkan prop onPreview
   isProcessing?: boolean;
   isCurrentFile?: boolean;
 }
@@ -17,6 +18,7 @@ export default function SortableFileItem({
   fileObj,
   index,
   onRemove,
+  onPreview, // Ambil dari props
   isProcessing = false,
   isCurrentFile = false,
 }: SortableFileItemProps) {
@@ -103,17 +105,15 @@ export default function SortableFileItem({
                 • {fileObj.error}
               </span>
             )}
-            {isProcessingFile && (
-              <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                • Memproses...
-              </span>
-            )}
           </div>
         </div>
+      </div>
 
+      {/* Action Buttons */}
+      <div className="flex items-center gap-1 ml-3">
         {/* Index Badge */}
         <div
-          className={`px-2.5 py-1 text-xs font-bold rounded-full flex-shrink-0 ${
+          className={`px-2.5 py-1 text-[10px] font-bold rounded-full mr-2 ${
             hasError
               ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
               : isProcessingFile
@@ -123,22 +123,39 @@ export default function SortableFileItem({
         >
           #{index + 1}
         </div>
-      </div>
 
-      {/* Remove Button */}
-      <button
-        onClick={() => onRemove(fileObj.id)}
-        disabled={isProcessing}
-        className={`ml-3 p-2 rounded-lg transition-all duration-200 flex-shrink-0 ${
-          isProcessing
-            ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
-            : "text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-        }`}
-        aria-label="Hapus file"
-      >
-        <Trash2 size={18} />
-      </button>
+        {/* Preview Button */}
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            onPreview(); // Panggil fungsi preview
+          }}
+          disabled={isProcessing}
+          className={`p-2 rounded-lg transition-all duration-200 ${
+            isProcessing
+              ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+              : "text-slate-400 dark:text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30"
+          }`}
+          title="Lihat isi PDF"
+        >
+          <Eye size={18} />
+        </button>
+
+        {/* Remove Button */}
+        <button
+          onClick={() => onRemove(fileObj.id)}
+          disabled={isProcessing}
+          className={`p-2 rounded-lg transition-all duration-200 ${
+            isProcessing
+              ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+              : "text-slate-400 dark:text-slate-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+          }`}
+          aria-label="Hapus file"
+          title="Hapus file"
+        >
+          <Trash2 size={18} />
+        </button>
+      </div>
     </div>
   );
 }
-
