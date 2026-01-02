@@ -1,113 +1,72 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Loader2, ShieldCheck, Zap, Lock, MousePointer2 } from "lucide-react";
-import {
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from "@dnd-kit/core";
-import { sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
-
-import { usePdfWorker } from "@/hooks/usePdfWorker";
-import { FileObject } from "@/types";
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { ShieldCheck, Zap, Lock, MousePointer2 } from "lucide-react";
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
-import FileList from "@/components/FileList";
-import ProgressBar from "@/components/ProgressBar";
-import DownloadSection from "@/components/DownloadSection";
+import { indexedDBManager } from "@/utils/indexedDB";
 
 export default function Home() {
-  const [fileObjects, setFileObjects] = useState<FileObject[]>([]);
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
-  const [downloadFileName, setDownloadFileName] = useState("pdf-merged");
   const fileUploadZoneRef = useRef<FileUploadZoneRef>(null);
 
-  const { isProcessing, progress, downloadUrl, currentFile, fileErrors, mergeFiles, reset } = usePdfWorker();
-
-  // Sync file errors dari worker ke fileObjects state
-  useEffect(() => {
-    if (fileErrors.length > 0) {
-      setFileObjects((prev) =>
-        prev.map((obj) => {
-          const error = fileErrors.find((e) => e.fileId === obj.id);
-          return error ? { ...obj, error: error.error } : obj;
-        })
-      );
-    }
-  }, [fileErrors]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  const addFiles = (files: File[]) => {
+  const addFiles = async (files: File[]) => {
     const pdfFiles = files.filter(
       (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
     );
 
-    if (pdfFiles.length === 0) return;
+    if (pdfFiles.length === 0) {
+      alert("Hanya file PDF yang didukung");
+      return;
+    }
 
-    const newObjects: FileObject[] = pdfFiles.map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      file,
-    }));
+    if (pdfFiles.length < 2) {
+      alert("Minimal 2 file PDF diperlukan untuk merge");
+      return;
+    }
 
-    setFileObjects((prev) => [...prev, ...newObjects]);
-    reset();
+    try {
+      // Generate session ID untuk batch files
+      const sessionId = `merge-${Date.now()}-${Math.random()}`;
+      const fileIds: string[] = [];
+
+      // Simpan setiap file ke IndexedDB
+      for (const file of pdfFiles) {
+        const fileId = `${file.name}-${Date.now()}-${Math.random()}`;
+        await indexedDBManager.saveFile(fileId, file);
+        fileIds.push(fileId);
+
+        // Simpan metadata ke sessionStorage
+        const fileMetadata = {
+          id: fileId,
+          name: file.name,
+        };
+        sessionStorage.setItem(`pdf-merge-${fileId}`, JSON.stringify(fileMetadata));
+      }
+
+      // Simpan session info dengan list file IDs
+      const sessionData = {
+        sessionId,
+        fileIds,
+        timestamp: Date.now(),
+      };
+      sessionStorage.setItem(`pdf-merge-session-${sessionId}`, JSON.stringify(sessionData));
+
+      // Navigate to editor
+      router.push(`/merge/editor?session=${encodeURIComponent(sessionId)}`);
+    } catch (error) {
+      console.error("Error saving files:", error);
+      alert("Error menyimpan file. Pastikan browser mendukung IndexedDB dan ada cukup ruang penyimpanan.");
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
-    addFiles(selectedFiles);
-  };
-
-  const handleMerge = async () => {
-    if (fileObjects.length < 2) return;
-    // Reset error state pada file objects
-    setFileObjects((prev) => prev.map((obj) => ({ ...obj, error: undefined, isProcessing: false })));
-    // Update processing state untuk file yang sedang diproses
-    if (currentFile) {
-      setFileObjects((prev) =>
-        prev.map((obj, index) => ({
-          ...obj,
-          isProcessing: index === currentFile.current - 1,
-        }))
-      );
-    }
-    await mergeFiles(fileObjects);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setFileObjects((items) => {
-        const oldIndex = items.findIndex((i) => i.id === active.id);
-        const newIndex = items.findIndex((i) => i.id === over.id);
-        return arrayMove(items, oldIndex, newIndex);
-      });
+    if (selectedFiles.length > 0) {
+      addFiles(selectedFiles);
     }
   };
-
-  // Update processing state berdasarkan currentFile
-  useEffect(() => {
-    if (isProcessing && currentFile) {
-      setFileObjects((prev) =>
-        prev.map((obj, index) => ({
-          ...obj,
-          isProcessing: index === currentFile.current - 1,
-        }))
-      );
-    } else if (!isProcessing) {
-      setFileObjects((prev) =>
-        prev.map((obj) => ({ ...obj, isProcessing: false }))
-      );
-    }
-  }, [isProcessing, currentFile]);
 
   return (
     <main className="min-h-screen bg-[#FDFDFF] dark:bg-slate-900 relative py-16 px-4 sm:px-6 transition-colors duration-200">
@@ -135,108 +94,22 @@ export default function Home() {
 
         {/* Main Application Interface */}
         <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-700 overflow-hidden transition-all duration-500">
-          
-          {/* Section: Upload */}
           <div className="p-2">
             <FileUploadZone
               ref={fileUploadZoneRef}
               isDragging={isDragging}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { e.preventDefault(); setIsDragging(false); addFiles(Array.from(e.dataTransfer.files)); }}
+              onDrop={(e) => { 
+                e.preventDefault(); 
+                setIsDragging(false); 
+                addFiles(Array.from(e.dataTransfer.files)); 
+              }}
               onFileChange={handleFileChange}
+              multiple={true}
+              label="Tarik dan lepas file PDF di sini"
+              subLabel="atau klik untuk memilih file (minimal 2 file)"
             />
-          </div>
-
-          {/* Section: List & Reorder */}
-          <div className="px-8 pb-8">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                Antrean Dokumen
-                <span className="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md text-[10px]">
-                  {fileObjects.length}
-                </span>
-              </h3>
-              {fileObjects.length > 0 && (
-                 <button 
-                  onClick={() => {
-                    setFileObjects([]);
-                    fileUploadZoneRef.current?.reset();
-                  }} 
-                  className="text-xs font-semibold text-red-400 dark:text-red-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                >
-                  Hapus Semua
-                </button>
-              )}
-            </div>
-            
-            <FileList
-              fileObjects={fileObjects}
-              onDragEnd={handleDragEnd}
-              onRemove={(id) => setFileObjects(prev => prev.filter(o => o.id !== id))}
-              isProcessing={isProcessing}
-              currentFileIndex={currentFile ? currentFile.current - 1 : null}
-            />
-          </div>
-
-          {/* Section: Execution & Progress */}
-          <div className="p-8 bg-slate-50/50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
-            {isProcessing && (
-              <div className="mb-8">
-                <ProgressBar progress={progress} />
-                {currentFile && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center">
-                    Memproses file {currentFile.current} dari {currentFile.total}
-                  </p>
-                )}
-              </div>
-            )}
-            
-            {/* Error Messages */}
-            {fileErrors.length > 0 && (
-              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
-                <h4 className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">
-                  {fileErrors.length} file memiliki error:
-                </h4>
-                <ul className="space-y-1">
-                  {fileErrors.map((error) => (
-                    <li key={error.fileId} className="text-xs text-red-700 dark:text-red-400">
-                      • <span className="font-medium">{error.fileName}</span>: {error.error}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!downloadUrl ? (
-              <button
-                onClick={handleMerge}
-                disabled={isProcessing || fileObjects.length < 2}
-                className="group relative w-full py-5 bg-slate-900 dark:bg-slate-700 text-white rounded-2xl font-bold overflow-hidden transition-all hover:bg-blue-600 dark:hover:bg-blue-700 disabled:bg-slate-200 dark:disabled:bg-slate-700 disabled:text-slate-400 dark:disabled:text-slate-500 active:scale-[0.98] shadow-xl hover:shadow-blue-200 dark:hover:shadow-blue-900/50 disabled:shadow-none"
-              >
-                <div className="relative z-10 flex items-center justify-center gap-3">
-                  {isProcessing ? (
-                    <Loader2 className="animate-spin" size={22} />
-                  ) : (
-                    <Zap size={20} className="fill-current" />
-                  )}
-                  <span className="text-lg">
-                    {isProcessing ? "Menyatukan PDF..." : "Gabungkan Sekarang"}
-                  </span>
-                </div>
-              </button>
-            ) : (
-              <DownloadSection
-                downloadUrl={downloadUrl}
-                fileName={downloadFileName}
-                onFileNameChange={setDownloadFileName}
-                onReset={() => { 
-                  setFileObjects([]); 
-                  reset();
-                  fileUploadZoneRef.current?.reset();
-                }}
-              />
-            )}
           </div>
         </div>
 
