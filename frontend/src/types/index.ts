@@ -6,13 +6,13 @@ export interface FileObject {
 }
 
 export interface WorkerMessage {
-  status: "progress" | "success" | "error" | "file-error" | "file-progress";
+  status: "progress" | "success" | "error" | "file-error" | "file-progress" | "page-progress" | "pdf-loaded";
   data?: any;
   message?: string;
   fileId?: string; // ID file yang bermasalah
   fileName?: string; // Nama file yang bermasalah
-  currentFile?: number; // File yang sedang diproses
-  totalFiles?: number; // Total file
+  currentFile?: number; // File yang sedang diproses atau halaman yang sedang diproses
+  totalFiles?: number; // Total file atau total halaman
 }
 
 export interface FileError {
