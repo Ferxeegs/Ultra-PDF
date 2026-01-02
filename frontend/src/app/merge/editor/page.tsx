@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowLeft, Zap, Plus } from "lucide-react";
+import { Loader2, ArrowLeft, Zap, Plus, Trash2 } from "lucide-react";
 import { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 
@@ -322,11 +322,17 @@ function MergeEditorContent() {
                   </h3>
                   {fileObjects.length > 0 && (
                     <button
-                      onClick={handleReset}
-                      className="text-xs font-semibold text-red-400 dark:text-red-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                    >
+                    onClick={handleReset}
+                    className="group flex items-center gap-1.5 text-xs font-bold text-blue-500 dark:text-blue-400/80 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200"
+                  >
+                    <Trash2 
+                      size={16} 
+                      className="transition-transform group-hover:-rotate-12" 
+                    />
+                    <span className="tracking-wider">
                       Hapus Semua
-                    </button>
+                    </span>
+                  </button>
                   )}
                 </div>
 

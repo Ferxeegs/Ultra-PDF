@@ -245,7 +245,7 @@ function SortableFilePreview({
               w-6 h-6 rounded-md flex items-center justify-center shadow-md transition-all
               ${isProcessing
                 ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-600 cursor-not-allowed"
-                : "bg-white dark:bg-slate-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+                : "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
               }
             `}
             title="Hapus file"
