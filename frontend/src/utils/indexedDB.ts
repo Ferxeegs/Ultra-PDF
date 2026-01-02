@@ -157,6 +157,41 @@ class IndexedDBManager {
   }
 
   /**
+   * Mendapatkan semua file info untuk ditampilkan di settings
+   */
+  async getAllFilesInfo(): Promise<Array<{ id: string; fileName: string; fileSize: number; timestamp: number }>> {
+    await this.init();
+    if (!this.db) throw new Error('Database not initialized');
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const records = request.result as FileRecord[];
+        resolve(
+          records.map((record) => ({
+            id: record.id,
+            fileName: record.fileName,
+            fileSize: record.fileSize,
+            timestamp: record.timestamp,
+          }))
+        );
+      };
+    });
+  }
+
+  /**
+   * Mendapatkan total ukuran semua file
+   */
+  async getTotalSize(): Promise<number> {
+    const files = await this.getAllFilesInfo();
+    return files.reduce((total, file) => total + file.fileSize, 0);
+  }
+
+  /**
    * Mendapatkan informasi file tanpa mengambil ArrayBuffer
    */
   async getFileInfo(id: string): Promise<{ fileName: string; fileSize: number } | null> {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Menu, X, Zap, Sun, Moon, Scissors } from "lucide-react";
+import { FileText, Menu, X, Zap, Sun, Moon, Scissors, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
@@ -21,6 +21,7 @@ export default function Navbar() {
     { name: "Merge PDF", href: "/", icon: FileText },
     { name: "Split PDF", href: "/split", icon: Scissors },
     { name: "Compress PDF", href: "/compress", icon: Zap },
+    { name: "Settings", href: "/settings", icon: Settings },
   ];
 
   return (
