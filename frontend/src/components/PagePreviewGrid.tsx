@@ -216,8 +216,8 @@ export default function PagePreviewGrid({
         </div>
       </div>
 
-      {/* Page Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[600px] overflow-y-auto p-1">
+      {/* Page Grid - Compact like RangePreview */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 max-h-[600px] overflow-y-auto p-1">
         {pagePreviews.map((preview) => {
           const isSelected = selectedPages.has(preview.pageNumber);
           const rangeInfo = showRangeIndicators ? getPageRangeInfo(preview.pageNumber) : null;
@@ -242,138 +242,123 @@ export default function PagePreviewGrid({
             <div
               key={preview.pageNumber}
               onClick={(e) => !showRangeIndicators && togglePage(preview.pageNumber, e)}
-              className={`
-                relative group rounded-xl overflow-hidden border-2 transition-all
-                ${isSelected
-                  ? "shadow-lg scale-[1.02] cursor-pointer"
-                  : isInRange && showRangeIndicators
-                  ? "shadow-md cursor-default"
-                  : "hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-md cursor-pointer"
-                }
-                ${borderColor} ${bgColor}
-              `}
+              className="relative group/card flex flex-col items-center gap-2"
             >
-              {/* Thumbnail */}
-              <div className="aspect-[3/4] bg-white dark:bg-slate-900 flex items-center justify-center relative min-h-[300px]">
+              {/* Thumbnail Card - Compact like RangePreview */}
+              <div className={`
+                relative w-full aspect-[3/4] rounded-xl overflow-hidden border-2 transition-all duration-300 shadow-sm
+                ${preview.thumbnailUrl 
+                  ? 'border-slate-200 dark:border-slate-700 group-hover/card:border-blue-400 group-hover/card:shadow-lg group-hover/card:-translate-y-1' 
+                  : 'border-slate-100 dark:border-slate-800'
+                }
+                ${isSelected && !showRangeIndicators
+                  ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                  : isInRange && showRangeIndicators
+                  ? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20'
+                  : 'bg-white dark:bg-slate-900'
+                }
+                ${!showRangeIndicators ? 'cursor-pointer' : 'cursor-default'}
+              `}>
                 {preview.thumbnailUrl ? (
                   <img
                     src={preview.thumbnailUrl}
                     alt={`Page ${preview.pageNumber}`}
-                    className="w-full h-full object-contain"
+                    className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="text-center p-4">
-                    <FileText className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Halaman {preview.pageNumber}
-                    </p>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-300 dark:text-slate-600">
+                    <FileText size={24} />
                   </div>
                 )}
-                
+
                 {/* Selection Indicator - Only show when NOT in range mode */}
                 {isSelected && !showRangeIndicators && (
-                  <div className="absolute top-3 right-3 w-7 h-7 bg-blue-500 dark:bg-blue-400 rounded-full flex items-center justify-center shadow-lg z-10">
-                    <Check size={16} className="text-white" />
+                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-blue-500 dark:bg-blue-400 rounded-full flex items-center justify-center shadow-lg z-10">
+                    <Check size={12} className="text-white" />
                   </div>
                 )}
                 
                 {/* Range Indicator - Show when in range mode */}
                 {isInRange && showRangeIndicators && (
-                  <div className="absolute top-3 right-3 w-7 h-7 bg-green-500 dark:bg-green-400 rounded-full flex items-center justify-center shadow-lg z-10">
-                    <span className="text-xs font-bold text-white">
+                  <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-green-500 dark:bg-green-400 rounded-full flex items-center justify-center shadow-lg z-10">
+                    <span className="text-[10px] font-bold text-white">
                       {rangeInfo ? rangeInfo.rangeIndex + 1 : ""}
                     </span>
                   </div>
                 )}
                 
-                {/* Range Start/End Indicators */}
-                {isInRange && showRangeIndicators && rangeInfo && (
-                  <>
-                    {rangeInfo.isStart && (
-                      <div className="absolute top-3 left-3 px-2 py-1 bg-green-500 dark:bg-green-400 text-white text-xs font-bold rounded shadow-lg z-10">
-                        Mulai
-                      </div>
-                    )}
-                    {rangeInfo.isEnd && (
-                      <div className="absolute bottom-3 left-3 px-2 py-1 bg-green-500 dark:bg-green-400 text-white text-xs font-bold rounded shadow-lg z-10">
-                        Akhir
-                      </div>
-                    )}
-                  </>
-                )}
-                
-                {/* Zoom Button */}
+                {/* Overlay Zoom on Hover */}
+                <div className="absolute inset-0 bg-blue-600/0 group-hover/card:bg-blue-600/10 transition-colors pointer-events-none" />
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     setZoomedPage(preview.pageNumber);
                   }}
-                  className="zoom-button absolute top-3 left-3 w-8 h-8 bg-white dark:bg-slate-800 rounded-lg flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-blue-50 dark:hover:bg-slate-700"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="zoom-button absolute top-1.5 right-1.5 p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 opacity-0 group-hover/card:opacity-100 transition-all hover:scale-110 active:scale-95 z-10"
                   title="Lihat preview lebih besar"
                 >
-                  <ZoomIn size={16} className="text-slate-600 dark:text-slate-300" />
+                  <ZoomIn size={12} className="text-blue-600 dark:text-blue-400" />
                 </button>
-                
-                {/* Hover Overlay */}
+
+                {/* Selection Hover Overlay - Only show when NOT in range mode */}
                 {!showRangeIndicators && (
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <div className="px-4 py-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-sm font-semibold shadow-lg">
+                  <div className="absolute inset-0 bg-black/0 group-hover/card:bg-black/5 transition-all flex items-center justify-center opacity-0 group-hover/card:opacity-100 pointer-events-none">
+                    <div className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-xs font-semibold shadow-lg">
                       {isSelected ? "Batal Pilih" : "Klik untuk Pilih"}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Page Number */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-                <p className="text-sm font-bold text-white text-center">
-                  Halaman {preview.pageNumber}
-                </p>
+              {/* Page Number Badge - Below thumbnail like RangePreview */}
+              <div className="px-2 py-0.5 bg-slate-800 dark:bg-slate-700 text-white text-[10px] font-bold rounded-full shadow-lg">
+                {preview.pageNumber}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Zoom Modal */}
+      {/* Zoom Modal - Using PDF Viewer like RangePreview */}
       {zoomedPage !== null && (
         <div 
-          className="fixed inset-0 bg-black/80 dark:bg-black/90 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
           onClick={() => setZoomedPage(null)}
         >
           <div 
-            className="relative max-w-4xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-2xl"
+            className="relative w-full max-w-5xl h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Close Button */}
-            <button
-              onClick={() => setZoomedPage(null)}
-              className="absolute top-4 right-4 w-10 h-10 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shadow-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors z-10"
-            >
-              <X size={20} className="text-slate-600 dark:text-slate-300" />
-            </button>
-
-            {/* Zoomed Preview */}
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4 text-center">
-                Halaman {zoomedPage}
-              </h3>
-              <div className="bg-slate-100 dark:bg-slate-800 rounded-lg p-4 max-h-[70vh] overflow-auto">
-                {pagePreviews[zoomedPage - 1]?.thumbnailUrl ? (
-                  <img
-                    src={pagePreviews[zoomedPage - 1].thumbnailUrl || ""}
-                    alt={`Page ${zoomedPage}`}
-                    className="w-full h-auto object-contain mx-auto"
-                  />
-                ) : (
-                  <div className="text-center py-12">
-                    <FileText className="w-16 h-16 text-slate-400 dark:text-slate-500 mx-auto mb-4" />
-                    <p className="text-slate-500 dark:text-slate-400">
-                      Preview tidak tersedia
-                    </p>
-                  </div>
-                )}
+            {/* Header Modal */}
+            <div className="flex items-center justify-between p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-600">
+                  <FileText size={20}/>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-tight">
+                    Pratinjau Halaman {zoomedPage}
+                  </h3>
+                </div>
               </div>
+              <button 
+                onClick={() => setZoomedPage(null)} 
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+              >
+                <X size={20}/>
+              </button>
+            </div>
+
+            {/* Iframe Viewport */}
+            <div className="flex-1 bg-slate-100 dark:bg-slate-950">
+              <iframe 
+                src={`${pdfUrl}#page=${zoomedPage}&toolbar=0&navpanes=0`} 
+                className="w-full h-full border-none" 
+                title="PDF Preview"
+              />
             </div>
           </div>
         </div>

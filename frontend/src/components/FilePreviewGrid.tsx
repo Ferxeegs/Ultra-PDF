@@ -41,13 +41,8 @@ function SortableFilePreview({
   const [isLoadingThumbnail, setIsLoadingThumbnail] = useState(true);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  // Combine dnd-kit transform with scale/rotate for dragging effect
-  const combinedTransform = isDragging && transform
-    ? `${CSS.Transform.toString(transform)} scale(1.05) rotate(1deg)`
-    : CSS.Transform.toString(transform);
-
   const style = {
-    transform: combinedTransform || undefined,
+    transform: CSS.Transform.toString(transform) || undefined,
     transition: isDragging ? undefined : transition,
     opacity: isDragging ? 0.9 : 1,
     zIndex: isDragging ? 50 : 1,
@@ -206,9 +201,12 @@ function SortableFilePreview({
           {index + 1}
         </div>
 
-        {/* Action Buttons - Bottom Right */}
+        {/* Overlay Zoom on Hover */}
+        <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 transition-colors pointer-events-none" />
+        
+        {/* Action Buttons - Top Right */}
         <div 
-          className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+          className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10"
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -222,15 +220,15 @@ function SortableFilePreview({
             onMouseDown={(e) => e.stopPropagation()}
             disabled={isProcessing || hasError}
             className={`
-              w-6 h-6 rounded-md flex items-center justify-center shadow-md transition-all
+              p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 transition-all hover:scale-110 active:scale-95
               ${isProcessing || hasError
-                ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-600 cursor-not-allowed"
-                : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-slate-700 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                ? "cursor-not-allowed opacity-50"
+                : "cursor-pointer"
               }
             `}
             title="Lihat preview"
           >
-            <Eye size={12} />
+            <Eye size={14} className="text-blue-600 dark:text-blue-400" />
           </button>
           <button
             onClick={(e) => {
@@ -242,15 +240,15 @@ function SortableFilePreview({
             onMouseDown={(e) => e.stopPropagation()}
             disabled={isProcessing}
             className={`
-              w-6 h-6 rounded-md flex items-center justify-center shadow-md transition-all
+              p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 transition-all hover:scale-110 active:scale-95
               ${isProcessing
-                ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-600 cursor-not-allowed"
-                : "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
+                ? "cursor-not-allowed opacity-50"
+                : "cursor-pointer"
               }
             `}
             title="Hapus file"
           >
-            <Trash2 size={12} />
+            <Trash2 size={14} className="text-red-600 dark:text-red-400" />
           </button>
         </div>
 
@@ -328,7 +326,14 @@ export default function FilePreviewGrid({
           </div>
         ) : (
           <SortableContext items={fileObjects.map((obj) => obj.id)} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-1 custom-scrollbar" style={{ willChange: 'transform' }}>
+            <div 
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-1 pb-4 custom-scrollbar" 
+              style={{ 
+                willChange: 'transform',
+                overscrollBehavior: 'contain',
+                scrollPaddingBlock: '1rem'
+              }}
+            >
               {fileObjects.map((obj, index) => (
                 <SortableFilePreview
                   key={obj.id}
@@ -345,23 +350,32 @@ export default function FilePreviewGrid({
         )}
       </DndContext>
 
-      {/* Preview Modal */}
+      {/* Preview Modal - Using style like RangePreview */}
       {previewUrl && (
-        <div className="fixed inset-0 z-[99] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="relative w-full max-w-4xl h-[90vh] bg-white dark:bg-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-5xl h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
             {/* Header Modal */}
-            <div className="flex items-center justify-between p-4 border-b dark:border-slate-700">
-              <h3 className="font-bold text-slate-900 dark:text-white">Preview Dokumen</h3>
+            <div className="flex items-center justify-between p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-600">
+                  <FileText size={20}/>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-tight">
+                    Pratinjau Dokumen
+                  </h3>
+                </div>
+              </div>
               <button
                 onClick={closePreview}
-                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
               >
                 <X size={20} className="text-slate-600 dark:text-slate-300" />
               </button>
             </div>
 
             {/* Iframe Viewport */}
-            <div className="flex-1 bg-slate-100 dark:bg-slate-900">
+            <div className="flex-1 bg-slate-100 dark:bg-slate-950">
               <iframe src={previewUrl} className="w-full h-full border-none" title="PDF Preview" />
             </div>
           </div>

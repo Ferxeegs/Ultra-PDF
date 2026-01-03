@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Download, ArrowLeft, Plus, X, List, Hash, ChevronUp, ChevronDown, Crown } from "lucide-react";
+import { Loader2, Download, ArrowLeft, Plus, X, List, Hash, ChevronUp, ChevronDown, Crown, Eye, FileText } from "lucide-react";
 import { usePdfSplitWorker } from "@/hooks/usePdfSplitWorker";
 import PagePreviewGrid from "@/components/PagePreviewGrid";
 import RangePreview from "@/components/RangePreview";
@@ -31,6 +31,8 @@ function SplitEditorContent() {
     const [mergeSelectedPages, setMergeSelectedPages] = useState<boolean>(false);
     const [rangeInputValues, setRangeInputValues] = useState<{ [key: string]: string }>({});
     const [fixedRangeInputValue, setFixedRangeInputValue] = useState<string>("");
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewFileName, setPreviewFileName] = useState<string | null>(null);
 
     const {
         isProcessing,
@@ -273,6 +275,20 @@ function SplitEditorContent() {
         URL.revokeObjectURL(url);
     };
 
+    const handlePreview = (result: { pageNumber: number; blob: Blob; fileName: string }) => {
+        const url = URL.createObjectURL(result.blob);
+        setPreviewUrl(url);
+        setPreviewFileName(result.fileName);
+    };
+
+    const closePreview = () => {
+        if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl(null);
+            setPreviewFileName(null);
+        }
+    };
+
     const handleBack = () => {
         // Hanya reset state, tidak perlu cleanup file karena akan dihapus otomatis
         // atau bisa digunakan lagi jika user kembali
@@ -432,23 +448,43 @@ function SplitEditorContent() {
                                         </label>
                                         <div className="max-h-96 overflow-y-auto space-y-2">
                                             {splitResults.map((result) => (
-                                                <button
+                                                <div
                                                     key={result.pageNumber}
-                                                    onClick={() => downloadSinglePage(result)}
-                                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-left flex items-center justify-between group transition-all"
+                                                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl flex items-center justify-between group transition-all"
                                                 >
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
                                                             <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
                                                                 {result.pageNumber}
                                                             </span>
                                                         </div>
-                                                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                                                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 truncate">
                                                             {result.fileName}
                                                         </span>
                                                     </div>
-                                                    <Download size={16} className="text-slate-400 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
-                                                </button>
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handlePreview(result);
+                                                            }}
+                                                            className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-600 transition-all"
+                                                            title="Lihat preview"
+                                                        >
+                                                            <Eye size={16} className="text-blue-600 dark:text-blue-400" />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                downloadSinglePage(result);
+                                                            }}
+                                                            className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-green-50 dark:hover:bg-slate-700 hover:border-green-300 dark:hover:border-green-600 transition-all"
+                                                            title="Download"
+                                                        >
+                                                            <Download size={16} className="text-green-600 dark:text-green-400" />
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>
@@ -494,6 +530,42 @@ function SplitEditorContent() {
                                     </div>
                                 </>
                             )}
+                        </div>
+                    )}
+
+                    {/* Preview Modal */}
+                    {previewUrl && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+                            <div className="relative w-full max-w-5xl h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+                                {/* Header Modal */}
+                                <div className="flex items-center justify-between p-4 border-b dark:border-slate-800 bg-white dark:bg-slate-900">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-blue-600">
+                                            <FileText size={20}/>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-tight">
+                                                Pratinjau {previewFileName}
+                                            </h3>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={closePreview}
+                                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                                    >
+                                        <X size={20} className="text-slate-600 dark:text-slate-300" />
+                                    </button>
+                                </div>
+
+                                {/* Iframe Viewport */}
+                                <div className="flex-1 bg-slate-100 dark:bg-slate-950">
+                                    <iframe
+                                        src={previewUrl}
+                                        className="w-full h-full border-none"
+                                        title="PDF Preview"
+                                    />
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>

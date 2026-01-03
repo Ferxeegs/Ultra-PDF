@@ -308,7 +308,7 @@ function MergeEditorContent() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Preview Grid - Takes remaining space */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4" style={{ overscrollBehavior: 'contain' }}>
           {!downloadUrl && (
             <>
               {/* File Preview Grid */}
@@ -323,7 +323,7 @@ function MergeEditorContent() {
                   {fileObjects.length > 0 && (
                     <button
                     onClick={handleReset}
-                    className="group flex items-center gap-1.5 text-xs font-bold text-blue-500 dark:text-blue-400/80 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200"
+                    className="group flex items-center gap-1.5 text-xs font-bold text-red-500 dark:text-red-400/80 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200"
                   >
                     <Trash2 
                       size={16} 
