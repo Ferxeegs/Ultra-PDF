@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Menu, X, Zap, Sun, Moon, Scissors, Settings } from "lucide-react";
+import { FileText, Menu, X, Zap, Sun, Moon, Scissors, Settings, Grid3x3 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
@@ -20,6 +20,7 @@ export default function Navbar() {
   const navItems = [
     { name: "Merge PDF", href: "/", icon: FileText },
     { name: "Split PDF", href: "/split", icon: Scissors },
+    { name: "Organize PDF", href: "/organize", icon: Grid3x3 },
     { name: "Compress PDF", href: "/compress", icon: Zap },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
@@ -58,7 +59,9 @@ export default function Navbar() {
             <div className="hidden md:flex items-center gap-8"> {/* Jarak antar menu ditingkatkan (gap-8) */}
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href;
+                const isActive = item.href === "/" 
+                  ? pathname === "/" 
+                  : pathname === item.href || pathname?.startsWith(`${item.href}/`);
                 
                 return (
                   <Link
@@ -125,7 +128,9 @@ export default function Navbar() {
           <div className="md:hidden py-6 space-y-3 border-t border-slate-100 dark:border-slate-800 animate-in slide-in-from-top duration-300">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isActive = item.href === "/" 
+                ? pathname === "/" 
+                : pathname === item.href || pathname?.startsWith(`${item.href}/`);
               return (
                 <Link
                   key={item.name}
