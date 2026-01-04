@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Scissors, Lock, MousePointer2 } from "lucide-react";
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
+import Footer from "@/components/Footer";
 import { indexedDBManager } from "@/utils/indexedDB";
 
 export default function SplitPage() {
@@ -120,13 +121,7 @@ export default function SplitPage() {
         </div>
 
         {/* Footer */}
-        <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-700">
-          <div className="text-center">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
-              © 2025 Ferxcode | All Rights Reserved
-            </p>
-          </div>
-        </footer>
+        <Footer />
       </div>
     </main>
   );

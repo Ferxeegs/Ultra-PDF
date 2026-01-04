@@ -8,6 +8,7 @@ import { CompressionQuality } from "@/utils/api";
 import FileUploadZone from "@/components/FileUploadZone";
 import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
+import Footer from "@/components/Footer";
 
 export default function CompressPage() {
   const [fileObject, setFileObject] = useState<FileObject | null>(null);
@@ -335,13 +336,7 @@ export default function CompressPage() {
         </div>
 
         {/* Footer */}
-        <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-700">
-          <div className="text-center">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">
-              © 2025 Ferxcode | All Rights Reserved
-            </p>
-          </div>
-        </footer>
+        <Footer />
       </div>
     </main>
   );
