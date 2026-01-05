@@ -1,48 +1,153 @@
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Request, Depends
 from fastapi.responses import FileResponse
 from app.services.pdf_service import PDFService
-import uuid, os, shutil
+from app.utils.security import (
+    validate_file_size,
+    validate_file_extension,
+    validate_file_content,
+    sanitize_filename,
+    get_safe_file_path
+)
+from app.middleware.rate_limit import limiter
+from pydantic import BaseModel, Field
+import uuid
+import os
+import shutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Folder tetap konsisten dengan docker-compose
-UPLOAD_DIR = "uploads"
-OUTPUT_DIR = "outputs"
+# Folder dari environment atau default
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
+
+# Validasi quality input
+ALLOWED_QUALITIES = ["low", "medium", "high"]
+
+
+class QualityInput(BaseModel):
+    """Model untuk validasi quality input"""
+    quality: str = Field(default="medium", pattern="^(low|medium|high)$")
+
 
 def remove_file(path: str):
-    if os.path.exists(path):
-        os.remove(path)
+    """Safely remove file dengan error handling"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            logger.info(f"File removed: {path}")
+    except Exception as e:
+        logger.error(f"Error removing file {path}: {e}")
+
 
 @router.post("/compress")
+@limiter.limit("10/minute")  # Rate limit: 10 requests per minute
 async def compress_pdf(
-    background_tasks: BackgroundTasks, 
-    file: UploadFile = File(...), 
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
     quality: str = Form("medium")
 ):
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Hanya file PDF yang diizinkan")
-
+    """
+    Compress PDF file dengan validasi keamanan
+    
+    - Validasi file size
+    - Validasi file extension
+    - Validasi file content (MIME type)
+    - Rate limiting
+    - Sanitized file paths
+    """
+    
+    # Validasi quality
+    if quality not in ALLOWED_QUALITIES:
+        logger.warning(f"Invalid quality parameter: {quality}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Quality must be one of: {', '.join(ALLOWED_QUALITIES)}"
+        )
+    
+    # Validasi filename
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    # Validasi ekstensi file
+    if not validate_file_extension(file.filename):
+        logger.warning(f"Invalid file extension: {file.filename}")
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are allowed"
+        )
+    
+    # Validasi ukuran file
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    
+    if not validate_file_size(file_size):
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '100')}MB)"
+        )
+    
+    # Generate safe file paths
     file_id = str(uuid.uuid4())
-    input_path = f"{UPLOAD_DIR}/{file_id}.pdf"
-    output_path = f"{OUTPUT_DIR}/compressed_{file_id}.pdf"
-
+    sanitized_filename = sanitize_filename(file.filename)
+    
+    try:
+        input_path = get_safe_file_path(UPLOAD_DIR, f"{file_id}.pdf")
+        output_path = get_safe_file_path(OUTPUT_DIR, f"compressed_{file_id}.pdf")
+    except ValueError as e:
+        logger.error(f"Path traversal attempt: {e}")
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
     # Simpan file yang diupload
-    with open(input_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+    try:
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Validasi konten file (MIME type detection)
+        if not validate_file_content(input_path):
+            remove_file(input_path)
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file content. Only PDF files are allowed"
+            )
+    except IOError as e:
+        logger.error(f"Error saving file: {e}")
+        raise HTTPException(status_code=500, detail="Error saving file")
+    
     # Proses kompresi
-    success = await PDFService.compress_pdf(input_path, output_path, quality)
-
-    if not success:
+    try:
+        success = await PDFService.compress_pdf(input_path, output_path, quality)
+        
+        if not success:
+            remove_file(input_path)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to compress PDF"
+            )
+    except Exception as e:
+        logger.error(f"Compression error: {e}")
         remove_file(input_path)
-        raise HTTPException(status_code=500, detail="Gagal mengompresi PDF")
-
+        if os.path.exists(output_path):
+            remove_file(output_path)
+        raise HTTPException(
+            status_code=500,
+            detail="Error during PDF compression"
+        )
+    
     # Jadwalkan penghapusan file sementara setelah file dikirim ke user
     background_tasks.add_task(remove_file, input_path)
+    background_tasks.add_task(remove_file, output_path)
+    
+    # Log successful compression
+    logger.info(f"PDF compressed successfully: {file.filename} ({file_size} bytes) -> {quality}")
     
     # Mengembalikan file secara langsung sebagai download
     return FileResponse(
-        path=output_path, 
-        filename=f"compressed_{file.filename}",
-        background=background_tasks.add_task(remove_file, output_path)
+        path=output_path,
+        filename=f"compressed_{sanitized_filename}",
+        media_type="application/pdf"
     )

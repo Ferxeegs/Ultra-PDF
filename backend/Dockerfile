@@ -12,6 +12,7 @@ WORKDIR /app
 # Install Ghostscript dan library sistem yang diperlukan
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
+    libmagic1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
