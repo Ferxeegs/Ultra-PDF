@@ -19,6 +19,7 @@ function MergeEditorContent() {
   const [fileObjects, setFileObjects] = useState<FileObject[]>([]);
   const [downloadFileName, setDownloadFileName] = useState("pdf-merged");
   const [isLoading, setIsLoading] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
 
   const { isProcessing, progress, downloadUrl, currentFile, fileErrors, mergeFiles, reset } = usePdfWorker();
 
@@ -308,7 +309,53 @@ function MergeEditorContent() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Preview Grid - Takes remaining space */}
-        <div className="flex-1 overflow-y-auto p-4" style={{ overscrollBehavior: 'contain' }}>
+        <div 
+          className="flex-1 overflow-y-auto p-4 relative" 
+          style={{ overscrollBehavior: 'contain' }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isDragging && !isProcessing && !downloadUrl) {
+              setIsDragging(true);
+            }
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Only set dragging to false if we're leaving the main container
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setIsDragging(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(false);
+            
+            if (isProcessing || downloadUrl) return;
+            
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) {
+              handleAddFiles(files);
+            }
+          }}
+        >
+          {/* Drag and Drop Overlay */}
+          {isDragging && !isProcessing && !downloadUrl && (
+            <div className="absolute inset-0 z-50 bg-blue-500/10 dark:bg-blue-900/30 backdrop-blur-sm border-4 border-dashed border-blue-500 dark:border-blue-400 rounded-xl flex items-center justify-center">
+              <div className="text-center">
+                <div className="p-6 rounded-full bg-blue-100 dark:bg-blue-900/40 mb-4 mx-auto w-fit">
+                  <Plus size={48} className="text-blue-600 dark:text-blue-400" />
+                </div>
+                <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                  Lepaskan file di sini untuk menambahkan
+                </p>
+                <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
+                  File PDF akan ditambahkan ke antrean
+                </p>
+              </div>
+            </div>
+          )}
           {!downloadUrl && (
             <>
               {/* File Preview Grid */}

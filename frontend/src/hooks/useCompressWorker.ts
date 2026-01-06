@@ -38,11 +38,6 @@ export function useCompressWorker() {
       formData.append("file", fileObject.file);
       formData.append("quality", quality);
 
-      // console.log("Uploading file to:", API_ENDPOINTS.compress);
-      // console.log("File name:", fileObject.file.name);
-      // console.log("File size:", fileObject.file.size);
-      // console.log("Quality:", quality);
-
       setProgress(10);
       setProgressMessage("Mengupload file ke server...");
 
@@ -53,10 +48,6 @@ export function useCompressWorker() {
         body: formData,
         signal: abortControllerRef.current.signal,
       });
-
-      // console.log("Response status:", response.status);
-      // console.log("Response ok:", response.ok);
-      // console.log("Response headers:", Object.fromEntries(response.headers.entries()));
 
       setProgress(50);
       setProgressMessage("Server sedang mengompres PDF...");
@@ -101,8 +92,6 @@ export function useCompressWorker() {
 
       // Get the compressed PDF as blob
       const blob = await response.blob();
-      // console.log("Blob size:", blob.size);
-      // console.log("Blob type:", blob.type);
 
       if (!blob || blob.size === 0) {
         throw new Error("File hasil kompresi kosong. Pastikan file PDF valid.");

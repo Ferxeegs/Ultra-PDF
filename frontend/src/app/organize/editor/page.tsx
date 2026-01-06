@@ -225,6 +225,7 @@ function OrganizeEditorContent() {
   const [pages, setPages] = useState<PageItem[]>([]);
   const [downloadFileName, setDownloadFileName] = useState("pdf-organized");
   const [isLoading, setIsLoading] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
   const [deletedPages, setDeletedPages] = useState<Set<string>>(new Set());
@@ -782,7 +783,52 @@ function OrganizeEditorContent() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Page Preview Grid */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div 
+          className="flex-1 overflow-y-auto p-4 relative"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isDragging && !isProcessing && !downloadUrl) {
+              setIsDragging(true);
+            }
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Only set dragging to false if we're leaving the main container
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setIsDragging(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(false);
+            
+            if (isProcessing || downloadUrl) return;
+            
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) {
+              handleAddFiles(files);
+            }
+          }}
+        >
+          {/* Drag and Drop Overlay */}
+          {isDragging && !isProcessing && !downloadUrl && (
+            <div className="absolute inset-0 z-50 bg-purple-500/10 dark:bg-purple-900/30 backdrop-blur-sm border-4 border-dashed border-purple-500 dark:border-purple-400 rounded-xl flex items-center justify-center">
+              <div className="text-center">
+                <div className="p-6 rounded-full bg-purple-100 dark:bg-purple-900/40 mb-4 mx-auto w-fit">
+                  <Plus size={48} className="text-purple-600 dark:text-purple-400" />
+                </div>
+                <p className="text-xl font-bold text-purple-700 dark:text-purple-300">
+                  Lepaskan file di sini untuk menambahkan
+                </p>
+                <p className="text-sm text-purple-600 dark:text-purple-400 mt-2">
+                  File PDF akan ditambahkan dan halamannya diekstrak
+                </p>
+              </div>
+            </div>
+          )}
           {!downloadUrl && (
             <>
               {isLoadingPages ? (
