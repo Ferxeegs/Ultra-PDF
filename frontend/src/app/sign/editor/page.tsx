@@ -566,18 +566,22 @@ function PagePreviewItem({
                       const handleMouseMove = (moveEvent: MouseEvent) => {
                         if (!canvasRef.current || !scaleFactor || pdfOriginalSize.width === 0) return;
                         
-                        // Calculate delta in browser pixels
+                        // Calculate delta in browser pixels (screen coordinates)
                         const deltaXPixels = moveEvent.clientX - startX;
                         const deltaYPixels = moveEvent.clientY - startY;
                         
-                        // Convert delta to PDF points
+                        // CRITICAL: Convert delta from browser pixels to PDF points
+                        // scaleFactor = browserPixels / pdfPoints
+                        // So: pdfPoints = browserPixels / scaleFactor
+                        // This ensures coordinates are stored in PDF Points, not screen pixels
                         const deltaXPoints = deltaXPixels / scaleFactor;
                         const deltaYPoints = deltaYPixels / scaleFactor;
                         
-                        // Calculate new position in PDF points
+                        // Calculate new position in PDF points (always store in PDF Points)
                         const newPdfX = Math.max(0, Math.min(pdfOriginalSize.width, startPdfX + deltaXPoints));
                         const newPdfY = Math.max(0, Math.min(pdfOriginalSize.height, startPdfY + deltaYPoints));
                         
+                        // Store position in PDF Points (not screen pixels) for consistency across devices
                         onTextMove(textPos.id, newPdfX, newPdfY);
                       };
                       
@@ -600,12 +604,16 @@ function PagePreviewItem({
                   >
                     <div
                       data-text-id={textPos.id}
-                      className="group-hover/text:outline group-hover/text:outline-2 group-hover/text:outline-blue-400 dark:group-hover/text:outline-blue-500 rounded px-1"
+                      className="group-hover/text:outline group-hover/text:outline-2 group-hover/text:outline-blue-400 dark:group-hover/text:outline-blue-500"
                       style={{
                         color: hexToRgb(textPos.color),
                         opacity: textPos.opacity / 100,
                         fontFamily: fontFamilyMap[textPos.fontFamily] || 'Arial, sans-serif',
                         fontSize: `${browserFontSize}px`,
+                        lineHeight: '1', // Use 1 to minimize leading space, matching canvas textBaseline='top'
+                        display: 'block',
+                        margin: 0,
+                        padding: 0, // Zero padding to match PDF rasterization (no hidden padding)
                         whiteSpace: 'nowrap',
                         userSelect: 'none',
                       }}
@@ -1499,8 +1507,9 @@ function SignEditorContent() {
           fontFamily: 'Helvetica' | 'TimesRoman' | 'Courier',
           color: string,
           opacity: number,
-          dpi: number = 150,
-          blur: number = 0
+          dpi: number = 300,
+          blur: number = 0,
+          padding: number = 20
         ): Promise<string> => {
           // Create offscreen canvas for rasterization
           const canvas = document.createElement('canvas');
@@ -1513,7 +1522,7 @@ function SignEditorContent() {
           const scaleFactor = dpi / 72;
           const canvasFontSize = fontSize * scaleFactor;
           
-          // Map font family to CSS font
+          // Map font family to CSS font (use same mapping as editor)
           const fontFamilyMap: Record<string, string> = {
             'Helvetica': 'Arial, Helvetica, sans-serif',
             'TimesRoman': 'Times, "Times New Roman", serif',
@@ -1525,15 +1534,18 @@ function SignEditorContent() {
           ctx.textBaseline = 'top';
           ctx.textAlign = 'left';
 
-          // Measure text
+          // Measure text with precision
           const metrics = ctx.measureText(text);
           const textWidth = metrics.width;
-          const textHeight = canvasFontSize * 1.2; // Add line height
-
-          // Set canvas size with minimal padding for blur
-          const canvasPadding = Math.max(blur * 2, 10); // Extra padding for blur effect
-          canvas.width = Math.ceil(textWidth + (canvasPadding * 2));
-          canvas.height = Math.ceil(textHeight + (canvasPadding * 2));
+          const actualHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+          
+          // Use fixed padding (20) for stability across different resolutions
+          // Canvas size: text dimensions + padding on all sides
+          // Use actualHeight for precision, but ensure minimum height for line-height consistency
+          const minTextHeight = canvasFontSize; // Minimum height based on font size
+          const textHeight = Math.max(actualHeight, minTextHeight);
+          canvas.width = Math.ceil(textWidth + (padding * 2));
+          canvas.height = Math.ceil(textHeight + (padding * 2));
 
           // Clear canvas with transparent background
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1556,8 +1568,8 @@ function SignEditorContent() {
           ctx.textBaseline = 'top';
           ctx.textAlign = 'left';
 
-          // Draw text with padding offset
-          ctx.fillText(text, canvasPadding, canvasPadding);
+          // Draw text with padding offset (top-left corner at padding, padding)
+          ctx.fillText(text, padding, padding);
 
           // Reset filter
           ctx.filter = 'none';
@@ -1570,47 +1582,65 @@ function SignEditorContent() {
           const page = pdfDoc.getPage(textPos.pageNumber - 1);
           const { width: pageWidth, height: pageHeight } = page.getSize();
         
-          const dpi = textPos.dpi || 150;
-          const scaleFactor = 72 / dpi; // Konversi dari DPI canvas ke poin PDF
+          // Use consistent DPI (300 for print quality)
+          const renderDpi = 300;
+          const pdfPointsPerInch = 72;
+          const scaleFactor = pdfPointsPerInch / renderDpi; // Convert from canvas pixels to PDF points
         
-          // 1. Dapatkan Data Image dari Rasterizer
-          const textImageDataUrl = await rasterizeText(textPos.text, textPos.fontSize, textPos.fontFamily, textPos.color, textPos.opacity, dpi, textPos.blur || 0);
+          // 1. Rasterize with known fixed padding
+          const canvasPadding = 20; // Fixed padding for stability across resolutions
+          const textImageDataUrl = await rasterizeText(
+            textPos.text, 
+            textPos.fontSize, 
+            textPos.fontFamily, 
+            textPos.color, 
+            textPos.opacity, 
+            renderDpi, 
+            textPos.blur || 0,
+            canvasPadding // Pass padding to function
+          );
           const base64Data = textImageDataUrl.split(',')[1];
           const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
           const textImage = await pdfDoc.embedPng(imageBytes);
         
-          // 2. Hitung dimensi gambar dalam poin PDF
-          const imageWidth = textImage.width * scaleFactor;
-          const imageHeight = textImage.height * scaleFactor;
-        
-          // 3. Hitung Padding (harus sama dengan yang ada di dalam rasterizeText)
-          const canvasPadding = Math.max((textPos.blur || 0) * 2, 10);
+          // 2. Calculate image size in PDF Points
+          const imageWidthInPoints = textImage.width * scaleFactor;
+          const imageHeightInPoints = textImage.height * scaleFactor;
           const paddingInPoints = canvasPadding * scaleFactor;
         
           /**
-           * PERBAIKAN KOORDINAT - Logika yang lebih presisi
+           * 3. PIXEL-PERFECT COORDINATE LOGIC
+           * x, y from state should already be in PDF Points (converted from browser pixels using scaleFactor).
            * 
-           * Untuk X: Tambahkan offset kecil ke kanan
-           * Untuk Y: Tambahkan offset lebih besar ke bawah
+           * LOGIKA PERBAIKAN:
+           * textPos.y = Jarak dari TOP halaman ke TOP teks di browser (dalam PDF Points).
+           * Kita ingin TOP teks di PDF berada tepat di textPos.y.
+           * 
+           * PDF uses bottom-left coordinate system (Y=0 at bottom)
+           * Browser uses top-left coordinate system (Y=0 at top)
+           * 
+           * Karena teks di dalam image ada di bawah padding (padding pixels dari top image),
+           * maka:
+           * - Titik TOP Image = (pageHeight - textPos.y) + paddingInPoints
+           * - Titik BOTTOM Image (pdfY) = Titik TOP Image - Total Tinggi Image
            */
-          const horizontalOffset = 2.5; // Offset untuk menggeser ke kanan
-          const pdfX = textPos.x + horizontalOffset;
+          // Posisi X: Geser ke kiri sebesar padding agar teks mulai tepat di x
+          const pdfX = textPos.x - paddingInPoints;
           
-          /**
-           * Jika "kurang ke bawah", artinya nilai pdfY (dari bawah) terlalu besar.
-           * Kita perlu mengurangi pdfY lebih banyak (menambahkan lebih banyak ke pengurangan)
-           * untuk menggeser teks ke bawah lebih banyak.
-           */
-          const browserLineHeightOffset = 1.5;
-          const verticalOffset = textPos.fontSize * 0.5; // Offset lebih besar untuk menggeser ke bawah lumayan banyak
-          const pdfY = pageHeight - textPos.y - textPos.fontSize - browserLineHeightOffset - verticalOffset;
+          // Posisi Y: 
+          // pageHeight - textPos.y = Posisi TOP teks dari bawah (sistem PDF)
+          // Karena teks di dalam image ada di bawah padding, maka:
+          // Titik TOP Image = (pageHeight - textPos.y) + paddingInPoints
+          // Titik BOTTOM Image (pdfY) = Titik TOP Image - Total Tinggi Image
+          const pdfY = (pageHeight - textPos.y) + paddingInPoints - imageHeightInPoints;
         
-          // Draw image dengan menggeser padding agar teksnya pas di textPos.x dan textPos.y
+          // Draw image with padding offset so text top is at textPos.y
+          // Note: Do not round coordinates too early to maintain precision
           page.drawImage(textImage, {
-            x: pdfX - paddingInPoints, // Geser image ke kiri agar teksnya pas di textPos.x
-            y: pdfY - paddingInPoints, // Geser image ke bawah agar teksnya pas di textPos.y
-            width: imageWidth,
-            height: imageHeight,
+            x: pdfX,
+            y: pdfY, 
+            width: imageWidthInPoints,
+            height: imageHeightInPoints,
           });
         }
 
@@ -2047,23 +2077,24 @@ function SignEditorContent() {
                         URL.revokeObjectURL(url);
 
                         const textId = `${currentFileId}-${currentPageNumber}-${Date.now()}`;
+                        // CRITICAL: Store coordinates in PDF Points (not screen pixels)
+                        // viewport.width and viewport.height from getViewport({ scale: 1 }) are already in PDF Points
                         const newText: TextPosition = {
                           id: textId,
                           fileId: currentFileId,
                           pageNumber: currentPageNumber,
-                          // Tempatkan agak ke tengah atas supaya lebih jelas terlihat
-                          x: viewport.width * 0.5, // center horizontally
-                          y: viewport.height * 0.15, // 15% from top
+                          // Place text at center-top for visibility
+                          x: viewport.width * 0.5, // center horizontally (PDF Points)
+                          y: viewport.height * 0.15, // 15% from top (PDF Points)
                           text: "Teks Baru",
-                          // Perbesar ukuran agar user sadar teks sudah muncul
-                          fontSize: 18,
-                          color: "#000000", // hitam
+                          fontSize: 18, // PDF Points
+                          color: "#000000",
                           opacity: 100,
                           fontFamily: "TimesRoman",
-                          pdfPageWidth: viewport.width,
-                          pdfPageHeight: viewport.height,
-                          dpi: 150, // Default DPI untuk dokumen scan
-                          blur: 0.3, // Default blur ringan
+                          pdfPageWidth: viewport.width, // PDF Points
+                          pdfPageHeight: viewport.height, // PDF Points
+                          dpi: 300, // Use 300 DPI for consistency with handleSignPDF
+                          blur: 0.3,
                         };
 
                         setTextPositions((prev) => {
