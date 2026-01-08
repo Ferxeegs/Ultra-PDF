@@ -2,20 +2,108 @@
 
 import { useRef, useState, useEffect } from "react";
 import SignatureCanvas from "react-signature-canvas";
-import { X, RotateCcw, Download, Upload, Palette, MoveHorizontal } from "lucide-react";
+import { X, RotateCcw, Download, Upload, Palette, MoveHorizontal, Edit } from "lucide-react";
+import ImageEditor from "./ImageEditor";
 
 interface SignaturePadProps {
   onSave: (dataUrl: string) => void;
   onClose: () => void;
+  onSaveDirect?: (dataUrl: string) => void; // Optional: untuk save langsung tanpa kembali ke canvas
 }
 
-export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
+export default function SignaturePad({ onSave, onClose, onSaveDirect }: SignaturePadProps) {
   const sigCanvas = useRef<SignatureCanvas>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   
   const [penColor, setPenColor] = useState("#000000");
-  const [maxWidth, setMaxWidth] = useState(2.5);
+  const [maxWidth, setMaxWidth] = useState(3);
   const [hasSignature, setHasSignature] = useState(false);
   const [isUploadMode, setIsUploadMode] = useState(false);
+  const [uploadedImageSrc, setUploadedImageSrc] = useState<string | null>(null);
+  const [showImageEditor, setShowImageEditor] = useState(false);
+
+  // Resize canvas to match container - ensure canvas size matches display size
+  useEffect(() => {
+    const resizeCanvas = () => {
+      const canvas = sigCanvas.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+
+      const canvasElement = (canvas as any).getCanvas();
+      if (!canvasElement) return;
+
+      // Get container dimensions
+      // Use clientWidth/clientHeight to exclude border and get actual content size
+      const containerWidth = Math.max(1, Math.floor(container.clientWidth));
+      const containerHeight = Math.max(1, Math.floor(container.clientHeight));
+
+      // Only resize if dimensions changed significantly (avoid unnecessary redraws)
+      if (Math.abs(canvasElement.width - containerWidth) < 2 && 
+          Math.abs(canvasElement.height - containerHeight) < 2) {
+        return;
+      }
+
+      // Save existing content if any
+      const hasContent = !canvas.isEmpty();
+      let existingData: string | null = null;
+      if (hasContent) {
+        existingData = canvas.toDataURL("image/png");
+      }
+
+      // Set canvas internal size (width/height attributes) to match container
+      // This ensures 1:1 pixel mapping between mouse coordinates and canvas coordinates
+      canvasElement.width = containerWidth;
+      canvasElement.height = containerHeight;
+      
+      // Also set CSS size to match internal size exactly (no scaling)
+      // This prevents coordinate offset issues
+      canvasElement.style.width = `${containerWidth}px`;
+      canvasElement.style.height = `${containerHeight}px`;
+      canvasElement.style.maxWidth = 'none';
+      canvasElement.style.maxHeight = 'none';
+
+      // Restore content if it existed
+      if (hasContent && existingData) {
+        // Small delay to ensure canvas is ready
+        setTimeout(() => {
+          canvas.fromDataURL(existingData, {
+            ratio: 1,
+            width: containerWidth,
+            height: containerHeight,
+          });
+        }, 10);
+      }
+    };
+
+    // Multiple attempts to ensure canvas is ready
+    const timeoutId1 = setTimeout(() => {
+      resizeCanvas();
+    }, 50);
+    
+    const timeoutId2 = setTimeout(() => {
+      resizeCanvas();
+    }, 200);
+    
+    // Use ResizeObserver to detect container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      // Debounce resize to avoid too many calls
+      setTimeout(resizeCanvas, 50);
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // Also listen to window resize
+    window.addEventListener('resize', resizeCanvas);
+
+    return () => {
+      clearTimeout(timeoutId1);
+      clearTimeout(timeoutId2);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, []);
 
   // =================================================================
   // FUNGSI INI AKAN MEMAKSA PERUBAHAN WARNA PADA DATA YANG SUDAH ADA
@@ -53,10 +141,13 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
 
   // Efek saat state penColor berubah
   useEffect(() => {
+    // Only change existing color if not in upload mode (drawing mode)
+    // In upload mode, user can draw with new color on top of image
     if (hasSignature && !isUploadMode) {
       changeExistingColor(penColor);
     }
-  }, [penColor]);
+    // In upload mode, penColor will be used for new drawings automatically
+  }, [penColor, hasSignature, isUploadMode]);
 
   // =================================================================
 
@@ -70,6 +161,8 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
     sigCanvas.current?.clear();
     setHasSignature(false);
     setIsUploadMode(false);
+    setUploadedImageSrc(null);
+    setShowImageEditor(false);
   };
 
   const handleSave = () => {
@@ -87,13 +180,95 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      sigCanvas.current?.fromDataURL(dataUrl, {
-        ratio: 1, width: 800, height: 300,
-      });
-      setHasSignature(true);
-      setIsUploadMode(true); 
+      // Store the uploaded image source for editing
+      setUploadedImageSrc(dataUrl);
+      // Show image editor first
+      setShowImageEditor(true);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageEditorSave = (editedImageDataUrl: string) => {
+    // If onSaveDirect is provided, save directly to parent and close everything
+    if (onSaveDirect) {
+      onSaveDirect(editedImageDataUrl);
+      setShowImageEditor(false);
+      onClose(); // Close SignatureCanvas modal
+      return;
+    }
+    
+    // Otherwise, load image to canvas (original behavior)
+    // Store the edited image for future editing
+    setUploadedImageSrc(editedImageDataUrl);
+    
+      // Load the edited image to get its dimensions
+      const img = new Image();
+      img.onload = () => {
+        const canvas = sigCanvas.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
+        
+        // Get container dimensions
+        // Use clientWidth/clientHeight to exclude border and get actual content size
+        const containerWidth = Math.max(1, Math.floor(container.clientWidth));
+        const containerHeight = Math.max(1, Math.floor(container.clientHeight));
+        
+        // Get the actual canvas DOM element from react-signature-canvas
+        const canvasElement = (canvas as any).getCanvas();
+        if (canvasElement) {
+          // Set canvas size to match container exactly
+          // This ensures drawing coordinates match the display (1:1 pixel mapping)
+          canvasElement.width = containerWidth;
+          canvasElement.height = containerHeight;
+          // Also set CSS size to match internal size
+          canvasElement.style.width = `${containerWidth}px`;
+          canvasElement.style.height = `${containerHeight}px`;
+        }
+        
+        // Load image to canvas - it will be scaled to fit container
+        // The fromDataURL will scale the image to fit the canvas size we set
+        canvas.fromDataURL(editedImageDataUrl, {
+          ratio: 1,
+          width: containerWidth,
+          height: containerHeight,
+        });
+        
+        // Double-check canvas size after loading image
+        setTimeout(() => {
+          const canvasElement = (canvas as any).getCanvas();
+          if (canvasElement) {
+            // Ensure canvas size is still correct
+            if (canvasElement.width !== containerWidth || canvasElement.height !== containerHeight) {
+              canvasElement.width = containerWidth;
+              canvasElement.height = containerHeight;
+              canvasElement.style.width = `${containerWidth}px`;
+              canvasElement.style.height = `${containerHeight}px`;
+              canvasElement.style.maxWidth = 'none';
+              canvasElement.style.maxHeight = 'none';
+            }
+          }
+          
+          // Re-enable the signature pad for drawing after loading image
+          const pad = (canvas as any).getSignaturePad();
+          if (pad) {
+            // Ensure pad is enabled for drawing
+            pad.off(); // Disable first to reset
+            pad.on(); // Re-enable to allow drawing
+            // Set pen color for new drawings
+            pad.penColor = penColor;
+          }
+        }, 150); // Small delay to ensure canvas is ready
+        
+        setHasSignature(true);
+        setIsUploadMode(true);
+        setShowImageEditor(false);
+      };
+      img.src = editedImageDataUrl;
+  };
+
+  const handleImageEditorClose = () => {
+    setShowImageEditor(false);
+    setUploadedImageSrc(null);
   };
 
   return (
@@ -115,7 +290,7 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
           {/* Toolbar */}
           <div className="flex flex-wrap items-center gap-6 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
             {/* Color Palette */}
-            <div className={`flex items-center gap-3 ${isUploadMode ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
+            <div className="flex items-center gap-3">
               <Palette size={18} className="text-slate-500" />
               <div className="flex gap-2 items-center">
                 {["#000000", "#2563eb", "#dc2626", "#16a34a", "#9333ea"].map((color) => (
@@ -176,7 +351,19 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
           </div>
 
           {/* Drawing Area */}
-          <div className="relative bg-white rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 h-[300px] shadow-inner">
+          <div 
+            ref={containerRef}
+            className="relative bg-white rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 h-[300px] shadow-inner"
+            style={{ 
+              position: 'relative', 
+              width: '100%', 
+              height: '300px',
+              padding: 0,
+              margin: 0,
+              overflow: 'hidden',
+              boxSizing: 'border-box'
+            }}
+          >
             <SignatureCanvas
               ref={sigCanvas}
               penColor={penColor}
@@ -185,16 +372,28 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
               velocityFilterWeight={0.7}
               onEnd={handleDrawingEnd}
               onBegin={() => {
-                if(isUploadMode) clear();
+                // Allow drawing on top of uploaded image
+                // Don't clear if in upload mode - let user draw on top
                 setHasSignature(true);
               }}
               canvasProps={{
-                className: "signature-canvas w-full h-full cursor-crosshair",
-                style: { touchAction: "none" }
+                className: "signature-canvas cursor-crosshair",
+                style: { 
+                  touchAction: "none",
+                  display: "block",
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  margin: 0,
+                  padding: 0,
+                  border: "none",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }
               }}
             />
             {!hasSignature && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 select-none">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 select-none z-10">
                 Coretkan tanda tangan di sini
               </div>
             )}
@@ -207,6 +406,28 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
               <span>Upload Gambar</span>
               <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
             </label>
+
+            {isUploadMode && hasSignature && (
+              <button
+                onClick={() => {
+                  if (uploadedImageSrc) {
+                    setShowImageEditor(true);
+                  } else {
+                    // If we don't have the original, get current canvas data
+                    if (sigCanvas.current && !sigCanvas.current.isEmpty()) {
+                      const dataUrl = sigCanvas.current.toDataURL("image/png");
+                      setUploadedImageSrc(dataUrl);
+                      setShowImageEditor(true);
+                    }
+                  }
+                }}
+                className="py-3 px-4 bg-purple-100 dark:bg-purple-900/30 hover:bg-purple-200 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-xl font-semibold flex items-center gap-2 transition-all"
+                title="Edit gambar yang diupload"
+              >
+                <Edit size={18} />
+                <span>Edit Gambar</span>
+              </button>
+            )}
 
             <button
               onClick={clear}
@@ -227,6 +448,17 @@ export default function SignaturePad({ onSave, onClose }: SignaturePadProps) {
           </div>
         </div>
       </div>
+
+      {/* Image Editor Modal */}
+      {showImageEditor && uploadedImageSrc && (
+        <ImageEditor
+          imageSrc={uploadedImageSrc}
+          onSave={handleImageEditorSave}
+          onClose={handleImageEditorClose}
+          allowDirectSave={!!onSaveDirect}
+          onSaveDirect={onSaveDirect}
+        />
+      )}
     </div>
   );
 }

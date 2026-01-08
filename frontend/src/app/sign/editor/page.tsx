@@ -2,14 +2,15 @@
 
 import { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowLeft, PenTool, Plus, X, Eye, FileText, GripVertical, Maximize2 } from "lucide-react";
+import { Loader2, ArrowLeft, PenTool, Plus, X, Eye, FileText, GripVertical, Maximize2, Type } from "lucide-react";
 import { FileObject } from "@/types";
 import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
 import SignaturePad from "@/components/SignatureCanvas";
 import SignaturePreview from "@/components/SignaturePreview";
+import TextToolbar, { TextPosition } from "@/components/TextToolbar";
 import { indexedDBManager } from "@/utils/indexedDB";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 interface SignaturePosition {
   id: string;
@@ -30,11 +31,16 @@ function PagePreviewItem({
   pdfFile,
   isLoading,
   positions,
+  textPositions,
   sessionSignature,
   onDrop,
   onSignatureMove,
   onSignatureResize,
   onSignatureRemove,
+  onTextMove,
+  onTextResize,
+  onTextRemove,
+  onTextClick,
   onDragOver,
   signatureAspectRatio,
 }: {
@@ -43,11 +49,16 @@ function PagePreviewItem({
   pdfFile: File | null;
   isLoading: boolean;
   positions: SignaturePosition[];
+  textPositions: TextPosition[];
   sessionSignature: string | null;
   onDrop: (e: React.DragEvent, pdfOriginalSize: { width: number; height: number }, scaleFactor: number) => void;
   onSignatureMove: (id: string, x: number, y: number) => void;
   onSignatureResize: (id: string, width: number, height: number) => void;
   onSignatureRemove: (id: string) => void;
+  onTextMove: (id: string, x: number, y: number) => void;
+  onTextResize: (id: string, fontSize: number) => void;
+  onTextRemove: (id: string) => void;
+  onTextClick: (id: string, position: { x: number; y: number }) => void;
   onDragOver?: (e: React.DragEvent, pdfOriginalSize: { width: number; height: number }, scaleFactor: number) => void;
   signatureAspectRatio: number | null;
 }) {
@@ -500,6 +511,168 @@ function PagePreviewItem({
                   </div>
                 );
               })}
+
+              {/* Render Text Elements */}
+              {canvasRef.current && pageSize.width > 0 && scaleFactor > 0 && textPositions.map((textPos: TextPosition) => {
+                // Convert PDF points to browser pixels
+                const browserX = textPos.x * scaleFactor;
+                const browserY = textPos.y * scaleFactor;
+                const browserFontSize = textPos.fontSize * scaleFactor;
+
+                // Calculate position relative to container
+                const containerRect = containerRef.current?.getBoundingClientRect();
+                const canvasRect = canvasRef.current?.getBoundingClientRect();
+                if (!containerRect || !canvasRect) return null;
+
+                // Calculate offset: canvas is centered with padding
+                const canvasOffsetX = canvasRect.left - containerRect.left;
+                const canvasOffsetY = canvasRect.top - containerRect.top;
+
+                // Convert HEX to RGB for CSS
+                const hexToRgb = (hex: string) => {
+                  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                  return result
+                    ? `rgb(${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)})`
+                    : 'rgb(0, 0, 0)';
+                };
+
+                // Map font family to CSS font
+                const fontFamilyMap: Record<string, string> = {
+                  'Helvetica': 'Arial, Helvetica, sans-serif',
+                  'TimesRoman': 'Times, "Times New Roman", serif',
+                  'Courier': 'Courier, monospace',
+                };
+
+                return (
+                  <div
+                    key={textPos.id}
+                    className="absolute pointer-events-auto cursor-move group/text z-20"
+                    style={{
+                      left: `${canvasOffsetX + browserX}px`,
+                      top: `${canvasOffsetY + browserY}px`,
+                    }}
+                    onMouseDown={(e) => {
+                      // Don't start drag if clicking on resize handle
+                      if ((e.target as HTMLElement).closest('.text-resize-handle')) {
+                        return;
+                      }
+                      e.stopPropagation();
+                      e.preventDefault();
+                      const startX = e.clientX;
+                      const startY = e.clientY;
+                      const startPdfX = textPos.x;
+                      const startPdfY = textPos.y;
+                      
+                      const handleMouseMove = (moveEvent: MouseEvent) => {
+                        if (!canvasRef.current || !scaleFactor || pdfOriginalSize.width === 0) return;
+                        
+                        // Calculate delta in browser pixels
+                        const deltaXPixels = moveEvent.clientX - startX;
+                        const deltaYPixels = moveEvent.clientY - startY;
+                        
+                        // Convert delta to PDF points
+                        const deltaXPoints = deltaXPixels / scaleFactor;
+                        const deltaYPoints = deltaYPixels / scaleFactor;
+                        
+                        // Calculate new position in PDF points
+                        const newPdfX = Math.max(0, Math.min(pdfOriginalSize.width, startPdfX + deltaXPoints));
+                        const newPdfY = Math.max(0, Math.min(pdfOriginalSize.height, startPdfY + deltaYPoints));
+                        
+                        onTextMove(textPos.id, newPdfX, newPdfY);
+                      };
+                      
+                      const handleMouseUp = () => {
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                      };
+                      
+                      document.addEventListener('mousemove', handleMouseMove);
+                      document.addEventListener('mouseup', handleMouseUp);
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      onTextClick(textPos.id, {
+                        x: rect.left + rect.width / 2,
+                        y: rect.top,
+                      });
+                    }}
+                  >
+                    <div
+                      data-text-id={textPos.id}
+                      className="group-hover/text:outline group-hover/text:outline-2 group-hover/text:outline-blue-400 dark:group-hover/text:outline-blue-500 rounded px-1"
+                      style={{
+                        color: hexToRgb(textPos.color),
+                        opacity: textPos.opacity / 100,
+                        fontFamily: fontFamilyMap[textPos.fontFamily] || 'Arial, sans-serif',
+                        fontSize: `${browserFontSize}px`,
+                        whiteSpace: 'nowrap',
+                        userSelect: 'none',
+                      }}
+                    >
+                      {textPos.text || 'Teks Baru'}
+                    </div>
+                    {/* Remove button on hover */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTextRemove(textPos.id);
+                      }}
+                      className="absolute -top-2.5 -right-2.5 w-7 h-7 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-full flex items-center justify-center opacity-0 group-hover/text:opacity-100 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 active:scale-95 z-20 border-2 border-white dark:border-slate-900"
+                      title="Hapus teks"
+                    >
+                      <X size={16} strokeWidth={2.5} />
+                    </button>
+                    {/* Resize handle (bottom-right corner) */}
+                    <div
+                      className="text-resize-handle absolute -bottom-2 -right-2 w-6 h-6 bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-500 active:bg-blue-700 dark:active:bg-blue-700 border-2 border-white dark:border-slate-900 rounded-md opacity-0 group-hover/text:opacity-100 transition-all duration-200 cursor-nwse-resize z-20 flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 active:scale-95"
+                      title="Resize teks"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const startX = e.clientX;
+                        const startY = e.clientY;
+                        const startFontSize = textPos.fontSize;
+                        const startWidth = textPos.fontSize; // Approximate width based on font size
+                        
+                        const handleMouseMove = (moveEvent: MouseEvent) => {
+                          if (!scaleFactor || pdfOriginalSize.width === 0) return;
+                          
+                          const deltaXPixels = moveEvent.clientX - startX;
+                          const deltaYPixels = moveEvent.clientY - startY;
+                          
+                          // Use the larger delta (width or height change)
+                          const deltaPoints = Math.max(
+                            Math.abs(deltaXPixels / scaleFactor),
+                            Math.abs(deltaYPixels / scaleFactor)
+                          );
+                          
+                          // Calculate new font size proportionally
+                          const sizeChange = deltaXPixels > 0 ? deltaPoints : -deltaPoints;
+                          let newFontSize = startFontSize + sizeChange;
+                          
+                          // Clamp to min/max sizes
+                          const minFontSize = 8;
+                          const maxFontSize = 72;
+                          newFontSize = Math.max(minFontSize, Math.min(maxFontSize, newFontSize));
+                          
+                          onTextResize(textPos.id, newFontSize);
+                        };
+                        
+                        const handleMouseUp = () => {
+                          document.removeEventListener('mousemove', handleMouseMove);
+                          document.removeEventListener('mouseup', handleMouseUp);
+                        };
+                        
+                        document.addEventListener('mousemove', handleMouseMove);
+                        document.addEventListener('mouseup', handleMouseUp);
+                      }}
+                    >
+                      <Maximize2 size={14} className="text-white rotate-45" strokeWidth={2.5} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -549,6 +722,10 @@ function SignEditorContent() {
   
   // Signature positions per file/page
   const [signaturePositions, setSignaturePositions] = useState<Map<string, SignaturePosition[]>>(new Map());
+  // Text positions per file/page
+  const [textPositions, setTextPositions] = useState<Map<string, TextPosition[]>>(new Map());
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [selectedTextToolbarPosition, setSelectedTextToolbarPosition] = useState<{ x: number; y: number } | null>(null);
   const [pdfPages, setPdfPages] = useState<Map<string, number>>(new Map());
   
   // Refs for thumbnail scrolling
@@ -562,10 +739,31 @@ function SignEditorContent() {
   useEffect(() => {
     currentPageNumberRef.current = currentPageNumber;
   }, [currentPageNumber]);
-  
+
   useEffect(() => {
     currentFileIdRef.current = currentFileId;
   }, [currentFileId]);
+
+  // Close text toolbar when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (selectedTextId) {
+        const target = e.target as HTMLElement;
+        // Don't close if clicking on toolbar or text element
+        if (!target.closest('.text-toolbar') && !target.closest('[data-text-id]')) {
+          setSelectedTextId(null);
+          setSelectedTextToolbarPosition(null);
+        }
+      }
+    };
+
+    if (selectedTextId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [selectedTextId]);
 
   // Load files dari sessionStorage dan IndexedDB
   useEffect(() => {
@@ -866,6 +1064,17 @@ function SignEditorContent() {
       return newMap;
     });
 
+    // Remove text positions for this file
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [mapKey] of newMap.entries()) {
+        if (mapKey.startsWith(`${id}-`)) {
+          newMap.delete(mapKey);
+        }
+      }
+      return newMap;
+    });
+
     // Remove from pdfPages
     setPdfPages((prev) => {
       const newMap = new Map(prev);
@@ -895,7 +1104,9 @@ function SignEditorContent() {
   const handleReset = () => {
     setFileObjects([]);
     setSignaturePositions(new Map());
+    setTextPositions(new Map());
     setSessionSignature(null);
+    setSelectedTextId(null);
     router.push("/sign");
   };
 
@@ -1119,9 +1330,82 @@ function SignEditorContent() {
     });
   };
 
+  // Text handlers
+  const handleTextMove = (id: string, x: number, y: number) => {
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [key, positions] of newMap.entries()) {
+        const updated = positions.map((pos) =>
+          pos.id === id ? { ...pos, x, y } : pos
+        );
+        if (updated.some((p) => p.id === id)) {
+          newMap.set(key, updated);
+          break;
+        }
+      }
+      return newMap;
+    });
+  };
+
+  const handleTextResize = (id: string, fontSize: number) => {
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [key, positions] of newMap.entries()) {
+        const updated = positions.map((pos) =>
+          pos.id === id ? { ...pos, fontSize } : pos
+        );
+        if (updated.some((p) => p.id === id)) {
+          newMap.set(key, updated);
+          break;
+        }
+      }
+      return newMap;
+    });
+  };
+
+  const handleTextRemove = (id: string) => {
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [key, positions] of newMap.entries()) {
+        const filtered = positions.filter((pos) => pos.id !== id);
+        if (filtered.length === 0) {
+          newMap.delete(key);
+        } else {
+          newMap.set(key, filtered);
+        }
+      }
+      return newMap;
+    });
+    if (selectedTextId === id) {
+      setSelectedTextId(null);
+    }
+  };
+
+  const handleTextClick = (id: string, position: { x: number; y: number }) => {
+    setSelectedTextId(id);
+    setSelectedTextToolbarPosition(position);
+  };
+
+  const handleTextUpdate = (updated: TextPosition) => {
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      const key = `${updated.fileId}-${updated.pageNumber}`;
+      const existing = newMap.get(key) || [];
+      const updatedList = existing.map((pos) =>
+        pos.id === updated.id ? updated : pos
+      );
+      newMap.set(key, updatedList);
+      return newMap;
+    });
+  };
+
   const handleSignPDF = async () => {
-    if (fileObjects.length === 0 || !sessionSignature) {
-      alert("Silakan buat tanda tangan terlebih dahulu.");
+    const hasAnyText = Array.from(textPositions.values()).some(
+      (positions) => positions && positions.length > 0
+    );
+
+    if (fileObjects.length === 0 || (!sessionSignature && !hasAnyText)) {
+      alert("Silakan tambahkan tanda tangan atau teks terlebih dahulu.");
       return;
     }
 
@@ -1139,13 +1423,18 @@ function SignEditorContent() {
         const arrayBuffer = await fileObj.file.arrayBuffer();
         const pdfDoc = await PDFDocument.load(arrayBuffer);
 
-        // Load signature image
-        const signatureImage = await pdfDoc.embedPng(sessionSignature);
-        
-        // Get original signature dimensions to calculate aspect ratio
-        const signatureAspectRatio = signatureImage.width / signatureImage.height;
+        // Load signature image (jika ada)
+        let signatureImage: any = null;
+        let signatureAspectRatioLocal: number | null = null;
 
-        // Get all positions for this file
+        if (sessionSignature) {
+          signatureImage = await pdfDoc.embedPng(sessionSignature);
+          // Get original signature dimensions to calculate aspect ratio
+          signatureAspectRatioLocal =
+            signatureImage.width / signatureImage.height;
+        }
+
+        // Get all signature positions for this file
         const allPositions: SignaturePosition[] = [];
         for (const [key, positions] of signaturePositions.entries()) {
           if (key.startsWith(`${fileObj.id}-`) && Array.isArray(positions)) {
@@ -1153,43 +1442,106 @@ function SignEditorContent() {
           }
         }
 
-        // Add signature to each position
-        for (const position of allPositions) {
-          const page = pdfDoc.getPage(position.pageNumber - 1);
+        // Add signature to each position (jika ada signature)
+        if (signatureImage && signatureAspectRatioLocal) {
+          for (const position of allPositions) {
+            const page = pdfDoc.getPage(position.pageNumber - 1);
+            const { width: pageWidth, height: pageHeight } = page.getSize();
+
+            // Positions are already in PDF points, use them directly
+            // But we need to handle Y-axis: PDF starts from bottom-left, our coordinates are top-left
+            // So: pdfY = pageHeight - position.y - position.height
+            const pdfX = position.x;
+            
+            // Calculate actual width and height maintaining signature aspect ratio
+            // Use the stored width/height as preferred size, but adjust to maintain aspect ratio
+            let finalWidth = position.width;
+            let finalHeight = position.height;
+            
+            // Check if current dimensions match signature aspect ratio
+            const positionAspectRatio = position.width / position.height;
+            
+            if (Math.abs(positionAspectRatio - signatureAspectRatioLocal) > 0.01) {
+              // Aspect ratios don't match, adjust to maintain signature aspect ratio
+              // Use width as primary dimension and calculate height
+              finalHeight = finalWidth / signatureAspectRatioLocal;
+              
+              // If calculated height exceeds position height, use height as primary instead
+              if (finalHeight > position.height) {
+                finalHeight = position.height;
+                finalWidth = finalHeight * signatureAspectRatioLocal;
+              }
+            }
+            
+            const pdfY = pageHeight - position.y - finalHeight;
+
+            page.drawImage(signatureImage, {
+              x: pdfX,
+              y: pdfY,
+              width: finalWidth,
+              height: finalHeight,
+            });
+          }
+        }
+
+        // Add text to each position
+        const allTextPositions: TextPosition[] = [];
+        for (const [key, positions] of textPositions.entries()) {
+          if (key.startsWith(`${fileObj.id}-`) && Array.isArray(positions)) {
+            allTextPositions.push(...positions);
+          }
+        }
+
+        for (const textPos of allTextPositions) {
+          const page = pdfDoc.getPage(textPos.pageNumber - 1);
           const { width: pageWidth, height: pageHeight } = page.getSize();
 
-          // Positions are already in PDF points, use them directly
-          // But we need to handle Y-axis: PDF starts from bottom-left, our coordinates are top-left
-          // So: pdfY = pageHeight - position.y - position.height
-          const pdfX = position.x;
-          
-          // Calculate actual width and height maintaining signature aspect ratio
-          // Use the stored width/height as preferred size, but adjust to maintain aspect ratio
-          let finalWidth = position.width;
-          let finalHeight = position.height;
-          
-          // Check if current dimensions match signature aspect ratio
-          const positionAspectRatio = position.width / position.height;
-          
-          if (Math.abs(positionAspectRatio - signatureAspectRatio) > 0.01) {
-            // Aspect ratios don't match, adjust to maintain signature aspect ratio
-            // Use width as primary dimension and calculate height
-            finalHeight = finalWidth / signatureAspectRatio;
-            
-            // If calculated height exceeds position height, use height as primary instead
-            if (finalHeight > position.height) {
-              finalHeight = position.height;
-              finalWidth = finalHeight * signatureAspectRatio;
-            }
-          }
-          
-          const pdfY = pageHeight - position.y - finalHeight;
+          // Convert HEX to RGB
+          const hexToRgb = (hex: string) => {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result
+              ? rgb(
+                  parseInt(result[1], 16) / 255,
+                  parseInt(result[2], 16) / 255,
+                  parseInt(result[3], 16) / 255
+                )
+              : rgb(0, 0, 0);
+          };
 
-          page.drawImage(signatureImage, {
+          // Get font
+          let font;
+          switch (textPos.fontFamily) {
+            case 'Helvetica':
+              font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+              break;
+            case 'TimesRoman':
+              font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+              break;
+            case 'Courier':
+              font = await pdfDoc.embedFont(StandardFonts.Courier);
+              break;
+            default:
+              font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+          }
+
+          // Convert Y coordinate: PDF uses bottom-left origin, we store top-left
+          // drawText uses baseline as anchor point, so we need to account for font height
+          // Add small offset for X to account for padding in editor (px-1 = 4px ≈ 3-4 points)
+          const pdfX = textPos.x + 3;
+          // For text, Y position in editor is top-left, but drawText uses baseline
+          // We need to subtract the font ascent to position baseline correctly
+          // Using smaller ascent ratio (0.7) to move text down slightly
+          const fontAscent = textPos.fontSize * 1.1;
+          const pdfY = pageHeight - textPos.y - fontAscent;
+
+          // Draw text with opacity
+          page.drawText(textPos.text, {
             x: pdfX,
             y: pdfY,
-            width: finalWidth,
-            height: finalHeight,
+            size: textPos.fontSize,
+            font: font,
+            color: hexToRgb(textPos.color),
+            opacity: textPos.opacity / 100,
           });
         }
 
@@ -1458,12 +1810,17 @@ function SignEditorContent() {
                                   pdfFile={currentFile.file}
                                   isLoading={false}
                                   positions={positions}
+                                  textPositions={textPositions.get(key) || []}
                                   sessionSignature={sessionSignature}
                                   onDrop={(e, pdfSize, scale) => handleThumbnailDrop(currentFileId, pageNum, e, pdfSize, scale)}
                                   onDragOver={(e, pdfSize, scale) => handleDragOver(currentFileId, pageNum, e, pdfSize, scale)}
                                   onSignatureMove={handleSignatureMove}
                                   onSignatureResize={handleSignatureResize}
                                   onSignatureRemove={handleSignatureRemove}
+                                  onTextMove={handleTextMove}
+                                  onTextResize={handleTextResize}
+                                  onTextRemove={handleTextRemove}
+                                  onTextClick={handleTextClick}
                                   signatureAspectRatio={signatureAspectRatio}
                                 />
                               </div>
@@ -1589,6 +1946,76 @@ function SignEditorContent() {
               </div>
             )}
 
+            {/* Add Text Button */}
+            {fileObjects.length > 0 && currentFileId && (
+              <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl p-4">
+                <button
+                  onClick={() => {
+                    // Add text to current page
+                    if (!currentFileId || !currentPageNumber) return;
+                    const key = `${currentFileId}-${currentPageNumber}`;
+                    const currentFile = fileObjects.find(f => f.id === currentFileId);
+                    if (!currentFile) return;
+
+                    // Get PDF page size
+                    const getPdfPageSize = async () => {
+                      try {
+                        const pdfjsLib = await import("pdfjs-dist");
+                        const version = pdfjsLib.version || "5.4.530";
+                        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+
+                        const url = URL.createObjectURL(currentFile.file);
+                        const loadingTask = pdfjsLib.getDocument({ url, verbosity: 0 });
+                        const pdf = await loadingTask.promise;
+                        // pdf.getPage menggunakan index 1-based, jadi langsung gunakan currentPageNumber
+                        const totalPages = pdf.numPages || 0;
+                        const safePageNumber = Math.min(
+                          Math.max(currentPageNumber, 1),
+                          totalPages || 1
+                        );
+                        const page = await pdf.getPage(safePageNumber);
+                        const viewport = page.getViewport({ scale: 1 });
+                        URL.revokeObjectURL(url);
+
+                        const textId = `${currentFileId}-${currentPageNumber}-${Date.now()}`;
+                        const newText: TextPosition = {
+                          id: textId,
+                          fileId: currentFileId,
+                          pageNumber: currentPageNumber,
+                          // Tempatkan agak ke tengah atas supaya lebih jelas terlihat
+                          x: viewport.width * 0.5, // center horizontally
+                          y: viewport.height * 0.15, // 15% from top
+                          text: "Teks Baru",
+                          // Perbesar ukuran agar user sadar teks sudah muncul
+                          fontSize: 18,
+                          color: "#000000", // hitam
+                          opacity: 100,
+                          fontFamily: "TimesRoman",
+                          pdfPageWidth: viewport.width,
+                          pdfPageHeight: viewport.height,
+                        };
+
+                        setTextPositions((prev) => {
+                          const newMap = new Map(prev);
+                          const existing = newMap.get(key) || [];
+                          newMap.set(key, [...existing, newText]);
+                          return newMap;
+                        });
+                        setSelectedTextId(textId);
+                      } catch (error) {
+                        console.error("Error adding text:", error);
+                      }
+                    };
+                    getPdfPageSize();
+                  }}
+                  className="w-full py-3 bg-purple-600 dark:bg-purple-700 hover:bg-purple-700 dark:hover:bg-purple-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all"
+                >
+                  <Type size={18} />
+                  <span>Tambah Teks</span>
+                </button>
+              </div>
+            )}
+
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
               <h3 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-2">
                 Cara Menggunakan
@@ -1617,11 +2044,18 @@ function SignEditorContent() {
               </ul>
             </div>
 
-            {!downloadUrl && (
+        {!downloadUrl && (
               <div className="pt-4">
                 <button
                   onClick={handleSignPDF}
-                  disabled={isProcessing || fileObjects.length === 0 || !sessionSignature}
+                  disabled={
+                    isProcessing ||
+                    fileObjects.length === 0 ||
+                    (!sessionSignature &&
+                      !Array.from(textPositions.values()).some(
+                        (positions) => positions && positions.length > 0
+                      ))
+                  }
                   className="w-full py-4 bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg disabled:bg-slate-200 dark:disabled:bg-slate-700 disabled:text-slate-400 dark:disabled:text-slate-500 disabled:shadow-none"
                 >
                   {isProcessing ? (
@@ -1646,6 +2080,7 @@ function SignEditorContent() {
       {showSignatureCanvas && (
         <SignaturePad
           onSave={handleSaveSignature}
+          onSaveDirect={handleSaveSignature} // Save langsung dari ImageEditor
           onClose={() => {
             setShowSignatureCanvas(false);
           }}
@@ -1666,6 +2101,36 @@ function SignEditorContent() {
           onClose={handleClosePreview}
         />
       )}
+
+      {/* Text Toolbar */}
+      {selectedTextId && selectedTextToolbarPosition && (() => {
+        const selectedText = Array.from(textPositions.values())
+          .flat()
+          .find((t) => t.id === selectedTextId);
+        
+        if (!selectedText) {
+          setSelectedTextId(null);
+          setSelectedTextToolbarPosition(null);
+          return null;
+        }
+
+        return (
+          <TextToolbar
+            textPosition={selectedText}
+            onUpdate={handleTextUpdate}
+            onClose={() => {
+              setSelectedTextId(null);
+              setSelectedTextToolbarPosition(null);
+            }}
+            onDelete={() => {
+              handleTextRemove(selectedTextId);
+              setSelectedTextId(null);
+              setSelectedTextToolbarPosition(null);
+            }}
+            position={selectedTextToolbarPosition}
+          />
+        );
+      })()}
     </div>
   );
 }

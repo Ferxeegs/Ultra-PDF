@@ -114,3 +114,13 @@ html.dark .custom-scrollbar::-webkit-scrollbar-thumb {
 html.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* Signature Canvas Reset */
+.signature-canvas {
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  outline: none !important;
+  display: block !important;
+}
