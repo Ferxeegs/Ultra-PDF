@@ -1582,8 +1582,8 @@ function SignEditorContent() {
           const page = pdfDoc.getPage(textPos.pageNumber - 1);
           const { width: pageWidth, height: pageHeight } = page.getSize();
         
-          // Use consistent DPI (300 for print quality)
-          const renderDpi = 300;
+          // Use DPI from textPosition, default to 300 for print quality
+          const renderDpi = textPos.dpi || 300;
           const pdfPointsPerInch = 72;
           const scaleFactor = pdfPointsPerInch / renderDpi; // Convert from canvas pixels to PDF points
         
@@ -1962,6 +1962,7 @@ function SignEditorContent() {
         </div>
 
         {/* Right: Sidebar */}
+        {!downloadUrl && (
         <div className="w-80 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col">
           <div className="p-6 space-y-6 overflow-y-auto flex-1">
             {/* Signature Display */}
@@ -2056,7 +2057,7 @@ function SignEditorContent() {
                     const currentFile = fileObjects.find(f => f.id === currentFileId);
                     if (!currentFile) return;
 
-                    // Get PDF page size
+                    // Get PDF page size and calculate position based on viewport
                     const getPdfPageSize = async () => {
                       try {
                         const pdfjsLib = await import("pdfjs-dist");
@@ -2076,6 +2077,48 @@ function SignEditorContent() {
                         const viewport = page.getViewport({ scale: 1 });
                         URL.revokeObjectURL(url);
 
+                        // Calculate position based on current viewport (visible area)
+                        let textX = viewport.width * 0.5; // Default: center horizontally
+                        let textY = viewport.height * 0.15; // Default: 15% from top
+
+                        // Try to get the current page element and calculate position from viewport
+                        const pageElement = document.getElementById(`page-${currentFileId}-${currentPageNumber}`);
+                        if (pageElement && mainViewerRef.current) {
+                          const viewerRect = mainViewerRef.current.getBoundingClientRect();
+                          const pageRect = pageElement.getBoundingClientRect();
+                          
+                          // Check if page is visible in viewport
+                          const isPageVisible = (
+                            pageRect.top < viewerRect.bottom &&
+                            pageRect.bottom > viewerRect.top
+                          );
+
+                          if (isPageVisible) {
+                            // Find the canvas element to get scaleFactor and position
+                            const canvas = pageElement.querySelector('canvas');
+                            if (canvas) {
+                              const canvasRect = canvas.getBoundingClientRect();
+                              // Calculate scaleFactor: canvas pixels / PDF points
+                              const scaleFactor = canvasRect.width / viewport.width;
+                              
+                              // Calculate visible area of canvas relative to viewer
+                              const canvasVisibleTop = Math.max(0, viewerRect.top - canvasRect.top);
+                              const canvasVisibleBottom = Math.min(canvasRect.height, viewerRect.bottom - canvasRect.top);
+                              const canvasVisibleHeight = canvasVisibleBottom - canvasVisibleTop;
+                              
+                              // Place text in the middle of visible canvas area (vertically)
+                              const visibleCenterY = canvasVisibleTop + (canvasVisibleHeight / 2);
+                              
+                              // Convert visible center position to PDF points
+                              // visibleCenterY is in browser pixels relative to canvas top
+                              textY = visibleCenterY / scaleFactor;
+                              
+                              // Ensure text is within page bounds
+                              textY = Math.max(50, Math.min(textY, viewport.height - 50));
+                            }
+                          }
+                        }
+
                         const textId = `${currentFileId}-${currentPageNumber}-${Date.now()}`;
                         // CRITICAL: Store coordinates in PDF Points (not screen pixels)
                         // viewport.width and viewport.height from getViewport({ scale: 1 }) are already in PDF Points
@@ -2083,9 +2126,9 @@ function SignEditorContent() {
                           id: textId,
                           fileId: currentFileId,
                           pageNumber: currentPageNumber,
-                          // Place text at center-top for visibility
-                          x: viewport.width * 0.5, // center horizontally (PDF Points)
-                          y: viewport.height * 0.15, // 15% from top (PDF Points)
+                          // Place text at visible viewport center
+                          x: textX, // center horizontally (PDF Points)
+                          y: textY, // position based on visible viewport (PDF Points)
                           text: "Teks Baru",
                           fontSize: 18, // PDF Points
                           color: "#000000",
@@ -2104,6 +2147,41 @@ function SignEditorContent() {
                           return newMap;
                         });
                         setSelectedTextId(textId);
+                        
+                        // Scroll to the text position after a short delay to ensure DOM is updated
+                        setTimeout(() => {
+                          const pageElement = document.getElementById(`page-${currentFileId}-${currentPageNumber}`);
+                          if (pageElement && mainViewerRef.current) {
+                            // Get canvas to calculate scaleFactor
+                            const canvas = pageElement.querySelector('canvas');
+                            if (canvas) {
+                              const canvasRect = canvas.getBoundingClientRect();
+                              const scaleFactor = canvasRect.width / viewport.width;
+                              
+                              // Convert textY (PDF points) to browser pixels
+                              const textYInPixels = textY * scaleFactor;
+                              
+                              // Get page element position relative to viewer
+                              const pageRect = pageElement.getBoundingClientRect();
+                              const viewerRect = mainViewerRef.current.getBoundingClientRect();
+                              
+                              // Calculate absolute position of text relative to viewer
+                              const textAbsoluteY = pageRect.top - viewerRect.top + 
+                                                   (canvasRect.top - pageRect.top) + 
+                                                   textYInPixels;
+                              
+                              // Calculate scroll position to center the text in viewport
+                              const scrollY = mainViewerRef.current.scrollTop + 
+                                            textAbsoluteY - 
+                                            (viewerRect.height / 2);
+                              
+                              mainViewerRef.current.scrollTo({
+                                top: Math.max(0, scrollY),
+                                behavior: 'smooth'
+                              });
+                            }
+                          }
+                        }, 150);
                       } catch (error) {
                         console.error("Error adding text:", error);
                       }
@@ -2176,6 +2254,7 @@ function SignEditorContent() {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Signature Canvas Modal */}

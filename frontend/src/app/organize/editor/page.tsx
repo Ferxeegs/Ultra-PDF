@@ -943,6 +943,7 @@ function OrganizeEditorContent() {
         </div>
 
         {/* Right: Sidebar */}
+        {!downloadUrl && (
         <div className="w-80 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col">
           <div className="p-6 space-y-6 overflow-y-auto flex-1">
             {/* Info Section */}
@@ -1161,6 +1162,7 @@ function OrganizeEditorContent() {
           )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Preview Modal */}
