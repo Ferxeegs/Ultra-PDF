@@ -13,6 +13,7 @@ import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
 import SortablePageItem, { PageItem } from "@/components/SortablePageItem";
 import { indexedDBManager } from "@/utils/indexedDB";
+import { clearPdfDocument, getPdfjsLibExport } from "@/utils/pdfjs";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { PDFDocument } from "pdf-lib";
@@ -245,7 +246,8 @@ function OrganizeEditorContent() {
     })
   );
 
-  // Extract pages from all files
+  // Extract pages from all files - Metadata-First Strategy
+  // Only get page count and basic info, don't render thumbnails
   const extractPagesFromFiles = async (files: FileObject[], startFileIndex: number = 0): Promise<PageItem[]> => {
     setIsLoadingPages(true);
     const allPages: PageItem[] = [];
@@ -254,36 +256,28 @@ function OrganizeEditorContent() {
       for (let i = 0; i < files.length; i++) {
         const fileObj = files[i];
         const fileIndex = startFileIndex + i;
-        const pdfjsLib = await import("pdfjs-dist");
-        const version = pdfjsLib.version || "5.4.530";
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+        
+        try {
+          // Get PDF.js library (lazy loaded, client-side only)
+          const pdfjsLib = await getPdfjsLibExport();
+          
+          // Convert file to ArrayBuffer to avoid blob URL issues
+          const arrayBuffer = await fileObj.file.arrayBuffer();
+          
+          // Use data directly instead of blob URL
+          // Note: We don't cache this because we only need metadata
+          const loadingTask = pdfjsLib.getDocument({ 
+            data: arrayBuffer, 
+            verbosity: 0 
+          });
+          const pdf = await loadingTask.promise;
+          const totalPages = pdf.numPages;
+          
+          // Cleanup PDF document after getting metadata
+          pdf.destroy?.();
 
-        const url = URL.createObjectURL(fileObj.file);
-        const loadingTask = pdfjsLib.getDocument({ url, verbosity: 0 });
-        const pdf = await loadingTask.promise;
-        const totalPages = pdf.numPages;
-
-        // Generate thumbnails for each page
-        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-          try {
-            const page = await pdf.getPage(pageNum);
-            const scale = 0.6;
-            const viewport = page.getViewport({ scale });
-
-            const canvas = document.createElement("canvas");
-            const context = canvas.getContext("2d");
-            if (!context) continue;
-
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-
-            await page.render({
-              canvasContext: context,
-              viewport: viewport,
-            } as any).promise;
-
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-
+          // Only get metadata - create page items without rendering thumbnails
+          for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             const pageId = `${fileObj.id}-page-${pageNum}`;
             allPages.push({
               id: pageId,
@@ -291,25 +285,27 @@ function OrganizeEditorContent() {
               fileId: fileObj.id,
               fileName: fileObj.file.name,
               fileIndex: fileIndex,
-              thumbnailUrl: dataUrl,
-              isLoading: false,
-            });
-          } catch (error) {
-            console.warn(`Error generating preview for page ${pageNum}:`, error);
-            const pageId = `${fileObj.id}-page-${pageNum}`;
-            allPages.push({
-              id: pageId,
-              pageNumber: pageNum,
-              fileId: fileObj.id,
-              fileName: fileObj.file.name,
-              fileIndex: fileIndex,
-              thumbnailUrl: null,
+              file: fileObj.file, // Store file reference for lazy loading
+              thumbnailUrl: null, // Will be loaded lazily by PageThumbnail component
               isLoading: false,
             });
           }
+        } catch (error) {
+          console.error(`Error loading PDF metadata for ${fileObj.file.name}:`, error);
+          // Still create page items even if metadata extraction fails
+          // The lazy loading component will handle the error
+          const pageId = `${fileObj.id}-page-1`;
+          allPages.push({
+            id: pageId,
+            pageNumber: 1,
+            fileId: fileObj.id,
+            fileName: fileObj.file.name,
+            fileIndex: fileIndex,
+            file: fileObj.file,
+            thumbnailUrl: null,
+            isLoading: false,
+          });
         }
-
-        URL.revokeObjectURL(url);
       }
     } catch (error) {
       console.error("Error extracting pages:", error);
@@ -648,6 +644,8 @@ function OrganizeEditorContent() {
     try {
       await indexedDBManager.deleteFile(id);
       sessionStorage.removeItem(`pdf-organize-${id}`);
+      // Clear PDF document from cache
+      clearPdfDocument(id);
     } catch (error) {
       console.error("Error deleting file:", error);
     }
@@ -870,7 +868,7 @@ function OrganizeEditorContent() {
                             const isDeleted = deletedPages.has(page.id);
                             return (
                               <SortablePageItem
-                                key={page.id}
+                                key={`${page.id}-${index}`}
                                 page={page}
                                 index={index}
                                 isProcessing={isProcessing}

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, FileText, X, Eye, Trash2 } from "lucide-react";
+import PageThumbnail from "./PageThumbnail";
 
 export interface PageItem {
   id: string; // Unique ID for the page
@@ -11,8 +12,9 @@ export interface PageItem {
   fileId: string; // ID of the file this page belongs to
   fileName: string; // Name of the file
   fileIndex: number; // Index of the file in the file list
-  thumbnailUrl: string | null;
-  isLoading: boolean;
+  file: File; // File reference for lazy loading
+  thumbnailUrl: string | null; // Deprecated: kept for backward compatibility
+  isLoading: boolean; // Deprecated: kept for backward compatibility
 }
 
 interface SortablePageItemProps {
@@ -178,23 +180,13 @@ export default function SortablePageItem({
     >
       {/* Thumbnail Preview */}
       <div className="aspect-[3/4] bg-white dark:bg-slate-900 flex items-center justify-center relative min-h-[200px] overflow-hidden">
-        {page.isLoading ? (
-          <div className="text-center">
-            <div className="w-6 h-6 border-2 border-purple-500 dark:border-purple-400 border-t-transparent rounded-full animate-spin mx-auto mb-1"></div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">Memuat...</p>
-          </div>
-        ) : page.thumbnailUrl ? (
-          <img
-            src={page.thumbnailUrl}
-            alt={`Page ${page.pageNumber} from ${page.fileName}`}
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <div className="text-center p-2">
-            <FileText className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto mb-1" />
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">Preview tidak tersedia</p>
-          </div>
-        )}
+        <PageThumbnail
+          fileId={page.fileId}
+          file={page.file}
+          pageNum={page.pageNumber}
+          scale={0.3}
+          className="w-full h-full"
+        />
 
         {/* Drag Indicator - Top Left (only show when not in delete mode) */}
         {!deleteMode && (
