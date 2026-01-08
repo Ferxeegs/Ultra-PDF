@@ -16,6 +16,8 @@ export interface TextPosition {
   fontFamily: 'Helvetica' | 'TimesRoman' | 'Courier';
   pdfPageWidth: number; // PDF points
   pdfPageHeight: number; // PDF points
+  dpi?: number; // DPI untuk rasterisasi (default: 150)
+  blur?: number; // Blur radius dalam pixels (default: 0)
 }
 
 interface TextToolbarProps {
@@ -38,6 +40,8 @@ export default function TextToolbar({
   const [localOpacity, setLocalOpacity] = useState(textPosition.opacity);
   const [localFontFamily, setLocalFontFamily] = useState(textPosition.fontFamily);
   const [localFontSize, setLocalFontSize] = useState(textPosition.fontSize);
+  const [localDpi, setLocalDpi] = useState(textPosition.dpi || 150);
+  const [localBlur, setLocalBlur] = useState(textPosition.blur || 0);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   // Update local state when textPosition changes
@@ -47,6 +51,8 @@ export default function TextToolbar({
     setLocalOpacity(textPosition.opacity);
     setLocalFontFamily(textPosition.fontFamily);
     setLocalFontSize(textPosition.fontSize);
+    setLocalDpi(textPosition.dpi || 150);
+    setLocalBlur(textPosition.blur || 0);
   }, [textPosition]);
 
   // Convert HEX to RGB
@@ -223,7 +229,7 @@ export default function TextToolbar({
       </div>
 
       {/* Font Size */}
-      <div>
+      <div className="mb-4">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
           Ukuran Font: {localFontSize}pt
         </label>
@@ -239,6 +245,62 @@ export default function TextToolbar({
           }}
           className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
         />
+      </div>
+
+      {/* DPI Setting */}
+      <div className="mb-4">
+        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+          DPI (Resolusi): {localDpi}
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min="72"
+            max="300"
+            step="1"
+            value={localDpi}
+            onChange={(e) => {
+              const dpi = parseInt(e.target.value);
+              setLocalDpi(dpi);
+              handleUpdate({ dpi });
+            }}
+            className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          />
+          <span className="text-xs text-slate-500 dark:text-slate-400 w-12 text-right">
+            {localDpi}
+          </span>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          Sesuaikan dengan resolusi dokumen asli (scan biasanya 150-200 DPI)
+        </p>
+      </div>
+
+      {/* Blur Setting */}
+      <div>
+        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+          Blur (Ketajaman): {localBlur.toFixed(1)}px
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={localBlur}
+            onChange={(e) => {
+              const blur = parseFloat(e.target.value);
+              setLocalBlur(blur);
+              handleUpdate({ blur });
+            }}
+            className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          />
+          <span className="text-xs text-slate-500 dark:text-slate-400 w-12 text-right">
+            {localBlur.toFixed(1)}
+          </span>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          Tambahkan blur ringan untuk menyamakan dengan dokumen scan
+        </p>
       </div>
     </div>
   );
