@@ -105,7 +105,7 @@ export default function CompressPage() {
                 }}
                 onFileChange={handleFileChange}
                 multiple={false}
-                label="Tarik dan lepas file PDF di sini"
+                label="Tarik dan lepas file PDF di sini (Max 100MB)"
                 subLabel="atau klik untuk memilih file (satu file)"
               />
             </div>
