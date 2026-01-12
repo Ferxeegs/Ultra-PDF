@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Palette, Type, SlidersHorizontal } from "lucide-react";
+import { X, Palette, Type, SlidersHorizontal, Copy } from "lucide-react";
 
 export interface TextPosition {
   id: string;
@@ -25,6 +25,7 @@ interface TextToolbarProps {
   onUpdate: (updated: TextPosition) => void;
   onClose: () => void;
   onDelete: () => void;
+  onDuplicate?: () => void; // Optional duplicate handler
   position: { x: number; y: number }; // Position in browser pixels
 }
 
@@ -33,6 +34,7 @@ export default function TextToolbar({
   onUpdate,
   onClose,
   onDelete,
+  onDuplicate,
   position,
 }: TextToolbarProps) {
   const [localText, setLocalText] = useState(textPosition.text);
@@ -121,6 +123,15 @@ export default function TextToolbar({
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">Edit Teks</h3>
         </div>
         <div className="flex items-center gap-2">
+          {onDuplicate && (
+            <button
+              onClick={onDuplicate}
+              className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded transition-colors"
+              title="Duplikat teks (Ctrl+D)"
+            >
+              <Copy size={16} className="text-blue-600 dark:text-blue-400" />
+            </button>
+          )}
           <button
             onClick={onDelete}
             className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"

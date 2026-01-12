@@ -734,6 +734,7 @@ function SignEditorContent() {
   const [textPositions, setTextPositions] = useState<Map<string, TextPosition[]>>(new Map());
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [selectedTextToolbarPosition, setSelectedTextToolbarPosition] = useState<{ x: number; y: number } | null>(null);
+  const [showTextToolbar, setShowTextToolbar] = useState(true); // State untuk mengontrol visibility toolbar
   const [pdfPages, setPdfPages] = useState<Map<string, number>>(new Map());
   
   // Refs for thumbnail scrolling
@@ -1392,6 +1393,7 @@ function SignEditorContent() {
   const handleTextClick = (id: string, position: { x: number; y: number }) => {
     setSelectedTextId(id);
     setSelectedTextToolbarPosition(position);
+    setShowTextToolbar(true); // Tampilkan toolbar saat teks diklik
   };
 
   const handleTextUpdate = (updated: TextPosition) => {
@@ -1405,6 +1407,123 @@ function SignEditorContent() {
       newMap.set(key, updatedList);
       return newMap;
     });
+  };
+
+  // Handle keyboard arrow keys untuk memindahkan teks dan Ctrl+D untuk duplicate
+  useEffect(() => {
+    if (!selectedTextId) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Hanya handle jika tidak sedang mengetik di input
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      // Ctrl+D atau Cmd+D untuk duplicate
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        handleTextDuplicate(selectedTextId);
+        return;
+      }
+
+      // Cari teks yang dipilih
+      const selectedText = Array.from(textPositions.values())
+        .flat()
+        .find((t) => t.id === selectedTextId);
+
+      if (!selectedText) return;
+
+      // Arrow keys untuk memindahkan teks
+      const stepSize = 1; // Langkah pergerakan dalam PDF points (dikurangi dari 5 menjadi 1)
+      let newX = selectedText.x;
+      let newY = selectedText.y;
+      let shouldMove = false;
+
+      switch (e.key) {
+        case "ArrowUp":
+          e.preventDefault();
+          newY = Math.max(0, selectedText.y - stepSize);
+          shouldMove = true;
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          newY = Math.min(selectedText.pdfPageHeight, selectedText.y + stepSize);
+          shouldMove = true;
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          newX = Math.max(0, selectedText.x - stepSize);
+          shouldMove = true;
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          newX = Math.min(selectedText.pdfPageWidth, selectedText.x + stepSize);
+          shouldMove = true;
+          break;
+        default:
+          return;
+      }
+
+      if (shouldMove) {
+        // Update posisi teks
+        handleTextMove(selectedTextId, newX, newY);
+        
+        // Sembunyikan toolbar saat menggeser dengan arrow keys agar tidak menutupi teks
+        // Tapi tetap biarkan selectedTextId agar arrow keys tetap berfungsi
+        setShowTextToolbar(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTextId, textPositions]);
+
+  // Fungsi untuk duplicate teks dengan semua settingannya
+  const handleTextDuplicate = (textId: string) => {
+    const selectedText = Array.from(textPositions.values())
+      .flat()
+      .find((t) => t.id === textId);
+
+    if (!selectedText) return;
+
+    // Buat duplikat dengan offset kecil (10 PDF points)
+    const duplicate: TextPosition = {
+      ...selectedText,
+      id: `${selectedText.fileId}-${selectedText.pageNumber}-${Date.now()}`,
+      x: selectedText.x + 10, // Offset sedikit ke kanan
+      y: selectedText.y + 10, // Offset sedikit ke bawah
+    };
+
+    // Tambahkan duplikat ke posisi yang sama
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      const key = `${duplicate.fileId}-${duplicate.pageNumber}`;
+      const existing = newMap.get(key) || [];
+      newMap.set(key, [...existing, duplicate]);
+      return newMap;
+    });
+
+    // Select teks yang baru di-duplicate
+    setTimeout(() => {
+      setSelectedTextId(duplicate.id);
+      setShowTextToolbar(true); // Tampilkan toolbar untuk teks yang baru di-duplicate
+      // Update toolbar position (akan di-update saat teks di-render)
+      const textElement = document.querySelector(`[data-text-id="${duplicate.id}"]`);
+      if (textElement) {
+        const rect = textElement.getBoundingClientRect();
+        setSelectedTextToolbarPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top,
+        });
+      }
+    }, 100);
   };
 
   const handleSignPDF = async () => {
@@ -2284,7 +2403,7 @@ function SignEditorContent() {
       )}
 
       {/* Text Toolbar */}
-      {selectedTextId && selectedTextToolbarPosition && (() => {
+      {selectedTextId && selectedTextToolbarPosition && showTextToolbar && (() => {
         const selectedText = Array.from(textPositions.values())
           .flat()
           .find((t) => t.id === selectedTextId);
@@ -2292,6 +2411,7 @@ function SignEditorContent() {
         if (!selectedText) {
           setSelectedTextId(null);
           setSelectedTextToolbarPosition(null);
+          setShowTextToolbar(false);
           return null;
         }
 
@@ -2302,11 +2422,16 @@ function SignEditorContent() {
             onClose={() => {
               setSelectedTextId(null);
               setSelectedTextToolbarPosition(null);
+              setShowTextToolbar(false);
             }}
             onDelete={() => {
               handleTextRemove(selectedTextId);
               setSelectedTextId(null);
               setSelectedTextToolbarPosition(null);
+              setShowTextToolbar(false);
+            }}
+            onDuplicate={() => {
+              handleTextDuplicate(selectedTextId);
             }}
             position={selectedTextToolbarPosition}
           />
