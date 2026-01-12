@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Environment configuration
 ENV = os.getenv("ENV", "development")
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+# Default allowed origins - include production domains
+DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://www.ultrapdf.my.id,https://ultrapdf.my.id"
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",")]
 
 app = FastAPI(
     title="UltraPDF Backend API",
@@ -55,8 +57,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS if ENV == "production" else ["*"],  # Strict di production
     allow_credentials=True,
-    allow_methods=["GET", "POST"],  # Hanya method yang diperlukan
-    allow_headers=["Content-Type", "Authorization"],  # Hanya headers yang diperlukan
+    allow_methods=["GET", "POST", "OPTIONS"],  # Tambahkan OPTIONS untuk preflight
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],  # Tambahkan headers yang diperlukan
     expose_headers=["Content-Disposition"],
     max_age=3600,  # Cache preflight untuk 1 jam
 )
@@ -73,35 +75,59 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Custom HTTP exception handler - jangan expose detail error di production"""
     logger.error(f"HTTP {exc.status_code}: {exc.detail} - {request.url}")
     
-    if ENV == "development":
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail}
-        )
-    else:
-        # Di production, jangan expose detail error
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": "An error occurred"}
-        )
+    # Pastikan CORS headers selalu ada, bahkan untuk error
+    response_content = {"detail": exc.detail} if ENV == "development" else {"detail": "An error occurred"}
+    
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content=response_content
+    )
+    
+    # Tambahkan CORS headers untuk error response
+    origin = request.headers.get("origin")
+    if origin and (origin in ALLOWED_ORIGINS or ENV != "production"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    
+    return response
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Custom validation error handler"""
     logger.warning(f"Validation error: {exc.errors()} - {request.url}")
-    return JSONResponse(
+    
+    response = JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": "Invalid request data"}
     )
+    
+    # Tambahkan CORS headers
+    origin = request.headers.get("origin")
+    if origin and (origin in ALLOWED_ORIGINS or ENV != "production"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Global exception handler"""
     logger.error(f"Unhandled exception: {exc} - {request.url}", exc_info=True)
-    return JSONResponse(
+    
+    response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error"}
     )
+    
+    # Tambahkan CORS headers
+    origin = request.headers.get("origin")
+    if origin and (origin in ALLOWED_ORIGINS or ENV != "production"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 
 # Include router
 app.include_router(api_router, prefix="/api/v1")

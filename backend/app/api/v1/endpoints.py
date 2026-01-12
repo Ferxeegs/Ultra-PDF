@@ -132,10 +132,10 @@ async def compress_pdf(
                     buffer.close()
                     if os.path.exists(input_path):
                         os.remove(input_path)
-                    logger.warning(f"File size {file_size} exceeds maximum {max_size}")
+                    logger.warning(f"File size {file_size / (1024*1024):.2f} MB exceeds maximum {max_size / (1024*1024):.2f} MB")
                     raise HTTPException(
                         status_code=413,
-                        detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '500')}MB)"
+                        detail=f"File size ({file_size / (1024*1024):.2f} MB) exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '500')} MB)"
                     )
                 
                 buffer.write(chunk)
