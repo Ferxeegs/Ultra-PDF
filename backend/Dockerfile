@@ -27,4 +27,6 @@ COPY . .
 EXPOSE 8000
 
 # Perintah default akan digantikan oleh docker-compose saat development
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --timeout-keep-alive: keep connection alive lebih lama untuk file besar (5 menit)
+# --limit-concurrency: limit concurrent connections (optional)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "300"]

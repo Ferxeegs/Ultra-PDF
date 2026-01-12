@@ -16,5 +16,8 @@ services:
       - ENV=development
       - PORT=8000
     # Mengaktifkan --reload agar FastAPI otomatis update saat kode berubah
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # --limit-max-requests: tidak ada limit untuk jumlah request
+    # --timeout-keep-alive: keep connection alive lebih lama untuk file besar
+    # --timeout-graceful-shutdown: waktu untuk graceful shutdown
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 30
     restart: always

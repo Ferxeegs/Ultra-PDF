@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Konstanta keamanan
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE_MB", "500")) * 1024 * 1024  # 100MB default
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE_MB", "500")) * 1024 * 1024  # 500MB default
 ALLOWED_MIME_TYPES = ["application/pdf"]
 ALLOWED_EXTENSIONS = [".pdf"]
 

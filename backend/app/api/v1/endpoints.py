@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Request, Depends
+from starlette.requests import Request as StarletteRequest
 from fastapi.responses import FileResponse
 from app.services.pdf_service import PDFService
 from app.utils.security import (
@@ -80,16 +81,10 @@ async def compress_pdf(
             detail="Only PDF files are allowed"
         )
     
-    # Validasi ukuran file
-    file.file.seek(0, os.SEEK_END)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    
-    if not validate_file_size(file_size):
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '100')}MB)"
-        )
+    # Validasi ukuran file - akan dilakukan sambil menyimpan file
+    # Jangan gunakan seek(SEEK_END) karena tidak efisien untuk file besar (>100MB)
+    # Kita akan validasi ukuran sambil menyimpan file secara streaming
+    max_size = int(os.getenv("MAX_FILE_SIZE_MB", "500")) * 1024 * 1024
     
     # Generate safe file paths
     file_id = str(uuid.uuid4())
@@ -102,10 +97,59 @@ async def compress_pdf(
         logger.error(f"Path traversal attempt: {e}")
         raise HTTPException(status_code=400, detail="Invalid filename")
     
-    # Simpan file yang diupload
+    # Simpan file yang diupload - gunakan streaming untuk file besar
+    file_size = 0
     try:
+        # Reset file pointer (jika file kecil, ini akan bekerja)
+        # Untuk file besar, FastAPI akan stream langsung tanpa perlu seek
+        try:
+            file.file.seek(0)
+        except (AttributeError, OSError):
+            # Jika seek tidak didukung (file besar), tidak apa-apa, file sudah di posisi awal
+            pass
+        
+        logger.info(f"Starting file upload: {file.filename}")
+        
         with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            chunk_size = 1024 * 1024  # 1MB chunks untuk efisiensi
+            
+            # Baca dan tulis file secara streaming sambil menghitung ukuran
+            chunk_count = 0
+            while True:
+                chunk = file.file.read(chunk_size)
+                if not chunk:
+                    break
+                
+                chunk_count += 1
+                file_size += len(chunk)
+                
+                # Log progress setiap 10MB untuk debugging
+                if chunk_count % 10 == 0:
+                    logger.info(f"Upload progress: {file_size / (1024 * 1024):.2f} MB")
+                
+                # Cek ukuran sambil membaca untuk early rejection
+                if file_size > max_size:
+                    buffer.close()
+                    if os.path.exists(input_path):
+                        os.remove(input_path)
+                    logger.warning(f"File size {file_size} exceeds maximum {max_size}")
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '500')}MB)"
+                    )
+                
+                buffer.write(chunk)
+        
+        logger.info(f"File uploaded successfully: {file.filename} ({file_size / (1024 * 1024):.2f} MB)")
+        
+        # Validasi ukuran file setelah selesai
+        if not validate_file_size(file_size):
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            raise HTTPException(
+                status_code=413,
+                detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '500')}MB)"
+            )
         
         # Validasi konten file (MIME type detection)
         if not validate_file_content(input_path):
