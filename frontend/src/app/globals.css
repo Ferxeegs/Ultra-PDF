@@ -28,6 +28,7 @@
 
   .animate-shimmer {
     animation: shimmer 2s infinite;
+    will-change: transform;
   }
 
   @keyframes gradient-shift {

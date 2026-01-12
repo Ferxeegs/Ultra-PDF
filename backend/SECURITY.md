@@ -109,9 +109,4 @@ Dependencies yang digunakan untuk keamanan:
 - `python-magic`: File content validation
 - `python-dotenv`: Environment variable management
 
-Pastikan untuk update dependencies secara berkala:
-```bash
-pip list --outdated
-pip install --upgrade <package>
-```
 
