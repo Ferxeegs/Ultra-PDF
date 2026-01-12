@@ -97,7 +97,7 @@ async def compress_pdf(
         logger.error(f"Path traversal attempt: {e}")
         raise HTTPException(status_code=400, detail="Invalid filename")
     
-    # Simpan file yang diupload - gunakan streaming untuk file besar
+    # Simpan file yang diupload - gunakan streaming untuk file besar dengan optimasi
     file_size = 0
     try:
         # Reset file pointer (jika file kecil, ini akan bekerja)
@@ -110,11 +110,30 @@ async def compress_pdf(
         
         logger.info(f"Starting file upload: {file.filename}")
         
-        with open(input_path, "wb") as buffer:
-            chunk_size = 1024 * 1024  # 1MB chunks untuk efisiensi
+        # Gunakan buffered I/O dengan buffer besar untuk performa optimal
+        # Chunk size 4MB untuk file besar (lebih cepat dari 1MB)
+        chunk_size = 4 * 1024 * 1024  # 4MB chunks untuk performa optimal
+        
+        # Validasi header PDF saat upload (early validation - lebih cepat)
+        first_chunk = file.file.read(chunk_size)
+        if not first_chunk:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+        
+        # Cek header PDF di chunk pertama (early rejection)
+        if first_chunk[:4] != b'%PDF':
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file content. Only PDF files are allowed"
+            )
+        
+        file_size = len(first_chunk)
+        
+        with open(input_path, "wb", buffering=8 * 1024 * 1024) as buffer:  # 8MB buffer
+            # Tulis chunk pertama yang sudah dibaca
+            buffer.write(first_chunk)
             
-            # Baca dan tulis file secara streaming sambil menghitung ukuran
-            chunk_count = 0
+            # Baca dan tulis sisa file secara streaming
+            chunk_count = 1
             while True:
                 chunk = file.file.read(chunk_size)
                 if not chunk:
@@ -123,8 +142,8 @@ async def compress_pdf(
                 chunk_count += 1
                 file_size += len(chunk)
                 
-                # Log progress setiap 10MB untuk debugging
-                if chunk_count % 10 == 0:
+                # Log progress setiap 50MB untuk mengurangi overhead logging
+                if chunk_count % 12 == 0:  # 12 * 4MB = 48MB ≈ 50MB
                     logger.info(f"Upload progress: {file_size / (1024 * 1024):.2f} MB")
                 
                 # Cek ukuran sambil membaca untuk early rejection
@@ -142,7 +161,7 @@ async def compress_pdf(
         
         logger.info(f"File uploaded successfully: {file.filename} ({file_size / (1024 * 1024):.2f} MB)")
         
-        # Validasi ukuran file setelah selesai
+        # Validasi ukuran file setelah selesai (double check)
         if not validate_file_size(file_size):
             if os.path.exists(input_path):
                 os.remove(input_path)
@@ -151,13 +170,16 @@ async def compress_pdf(
                 detail=f"File size exceeds maximum limit ({os.getenv('MAX_FILE_SIZE_MB', '500')}MB)"
             )
         
-        # Validasi konten file (MIME type detection)
-        if not validate_file_content(input_path):
-            remove_file(input_path)
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid file content. Only PDF files are allowed"
-            )
+        # Validasi konten file (MIME type detection) - optimasi untuk file besar
+        # Header PDF sudah divalidasi saat upload, skip validasi untuk file besar
+        # Hanya validasi dengan magic untuk file kecil (< 10MB) untuk keamanan ekstra
+        if file_size < 10 * 1024 * 1024:  # Hanya validasi magic untuk file < 10MB
+            if not validate_file_content(input_path):
+                remove_file(input_path)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid file content. Only PDF files are allowed"
+                )
     except IOError as e:
         logger.error(f"Error saving file: {e}")
         raise HTTPException(status_code=500, detail="Error saving file")

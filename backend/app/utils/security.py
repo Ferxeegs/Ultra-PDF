@@ -35,10 +35,23 @@ def validate_file_extension(filename: str) -> bool:
 
 
 def validate_file_content(file_path: str) -> bool:
-    """Validasi konten file menggunakan magic bytes (lebih aman dari ekstensi)"""
+    """
+    Validasi konten file menggunakan magic bytes (lebih aman dari ekstensi)
+    Optimasi: untuk file besar, hanya baca header saja, tidak perlu magic yang membaca seluruh file
+    """
     try:
+        # Untuk file besar, langsung validasi header saja (lebih cepat)
+        file_size = os.path.getsize(file_path)
+        if file_size > 10 * 1024 * 1024:  # File > 10MB, skip magic (lambat)
+            with open(file_path, 'rb') as f:
+                header = f.read(4)
+                if header[:4] != b'%PDF':
+                    logger.warning("File does not appear to be a valid PDF (header check)")
+                    return False
+            return True
+        
+        # Untuk file kecil, gunakan magic untuk validasi lebih ketat
         import magic
-        # Gunakan python-magic untuk deteksi MIME type yang sebenarnya
         mime = magic.Magic(mime=True)
         detected_mime = mime.from_file(file_path)
         
@@ -49,7 +62,6 @@ def validate_file_content(file_path: str) -> bool:
         return True
     except ImportError:
         # Fallback jika python-magic tidak tersedia
-        logger.warning("python-magic not available, using fallback validation")
         # Baca beberapa bytes pertama untuk basic validation
         try:
             with open(file_path, 'rb') as f:
