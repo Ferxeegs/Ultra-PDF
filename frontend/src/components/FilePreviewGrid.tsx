@@ -6,7 +6,7 @@ import {
   SortableContext,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
-import { FileText, Trash2, GripVertical, AlertCircle, Loader2, Eye, X } from "lucide-react";
+import { FileText, Trash2, GripVertical, AlertCircle, Loader2, Eye, X, RotateCw } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { FileObject } from "@/types";
@@ -16,6 +16,8 @@ interface SortableFilePreviewProps {
   index: number;
   onRemove: (id: string) => void;
   onPreview: (file: File) => void;
+  onRotate?: (id: string) => void;
+  rotation?: number;
   isProcessing?: boolean;
   isCurrentFile?: boolean;
 }
@@ -25,6 +27,8 @@ function SortableFilePreview({
   index,
   onRemove,
   onPreview,
+  onRotate,
+  rotation = 0,
   isProcessing = false,
   isCurrentFile = false,
 }: SortableFilePreviewProps) {
@@ -151,6 +155,7 @@ function SortableFilePreview({
             src={thumbnailUrl}
             alt={`Preview ${fileObj.file.name}`}
             className="w-full h-full object-contain"
+            style={{ transform: `rotate(${rotation}deg)` }}
           />
         ) : hasError ? (
           <div className="text-center p-2">
@@ -210,6 +215,28 @@ function SortableFilePreview({
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {onRotate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onRotate(fileObj.id);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              disabled={isProcessing || hasError}
+              className={`
+                p-1.5 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 transition-all hover:scale-110 active:scale-95
+                ${isProcessing || hasError
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer"
+                }
+              `}
+              title="Rotasi halaman"
+            >
+              <RotateCw size={14} className="text-green-600 dark:text-green-400" />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -279,6 +306,8 @@ interface FilePreviewGridProps {
   fileObjects: FileObject[];
   onDragEnd: (event: DragEndEvent) => void;
   onRemove: (id: string) => void;
+  onRotate?: (id: string) => void;
+  fileRotations?: Map<string, number>;
   isProcessing?: boolean;
   currentFileIndex?: number | null;
 }
@@ -287,6 +316,8 @@ export default function FilePreviewGrid({
   fileObjects,
   onDragEnd,
   onRemove,
+  onRotate,
+  fileRotations = new Map(),
   isProcessing = false,
   currentFileIndex = null,
 }: FilePreviewGridProps) {
@@ -341,6 +372,8 @@ export default function FilePreviewGrid({
                   index={index}
                   onRemove={onRemove}
                   onPreview={handlePreview}
+                  onRotate={onRotate}
+                  rotation={fileRotations.get(obj.id) || 0}
                   isProcessing={isProcessing}
                   isCurrentFile={currentFileIndex === index}
                 />

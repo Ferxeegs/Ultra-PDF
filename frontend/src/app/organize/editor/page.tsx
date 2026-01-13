@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowLeft, Zap, Plus, Trash2, X, Eye } from "lucide-react";
+import { Loader2, ArrowLeft, Zap, Plus, Trash2, X, Eye, RotateCw } from "lucide-react";
 import { DragEndEvent } from "@dnd-kit/core";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -16,7 +16,7 @@ import { indexedDBManager } from "@/utils/indexedDB";
 import { clearPdfDocument, getPdfjsLibExport } from "@/utils/pdfjs";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, degrees } from "pdf-lib";
 
 // Color palette for different files (same as SortablePageItem)
 const FILE_COLORS = [
@@ -237,6 +237,7 @@ function OrganizeEditorContent() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<{ current: number; total: number } | null>(null);
   const [fileErrors, setFileErrors] = useState<Array<{ fileId: string; fileName: string; error: string }>>([]);
+  const [pageRotations, setPageRotations] = useState<Map<string, number>>(new Map()); // Map<pageId, rotationAngle>
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -289,6 +290,14 @@ function OrganizeEditorContent() {
               thumbnailUrl: null, // Will be loaded lazily by PageThumbnail component
               isLoading: false,
             });
+            // Initialize rotation for new pages
+            setPageRotations((prev) => {
+              const newMap = new Map(prev);
+              if (!newMap.has(pageId)) {
+                newMap.set(pageId, 0);
+              }
+              return newMap;
+            });
           }
         } catch (error) {
           console.error(`Error loading PDF metadata for ${fileObj.file.name}:`, error);
@@ -304,6 +313,14 @@ function OrganizeEditorContent() {
             file: fileObj.file,
             thumbnailUrl: null,
             isLoading: false,
+          });
+          // Initialize rotation for error page
+          setPageRotations((prev) => {
+            const newMap = new Map(prev);
+            if (!newMap.has(pageId)) {
+              newMap.set(pageId, 0);
+            }
+            return newMap;
           });
         }
       }
@@ -457,7 +474,14 @@ function OrganizeEditorContent() {
           
           // Copy page
           const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
-          mergedPdf.addPage(copiedPage);
+          const newPage = mergedPdf.addPage(copiedPage);
+          
+          // Apply rotation if needed
+          const rotation = pageRotations.get(page.id) || 0;
+          if (rotation !== 0) {
+            const currentRotation = newPage.getRotation();
+            newPage.setRotation(degrees(currentRotation.angle + rotation));
+          }
           
           processedCount++;
           
@@ -514,6 +538,17 @@ function OrganizeEditorContent() {
     });
   };
 
+  // Rotate page
+  const handleRotatePage = (pageId: string) => {
+    setPageRotations((prev) => {
+      const newMap = new Map(prev);
+      const currentRotation = newMap.get(pageId) || 0;
+      const newRotation = (currentRotation + 90) % 360; // Rotate 90 degrees clockwise
+      newMap.set(pageId, newRotation);
+      return newMap;
+    });
+  };
+
   // Handle page preview
   const handlePagePreview = (page: PageItem) => {
     // Find the file object
@@ -536,6 +571,13 @@ function OrganizeEditorContent() {
       const newSet = new Set(prev);
       newSet.delete(pageId);
       return newSet;
+    });
+    
+    // Remove rotation data
+    setPageRotations((prev) => {
+      const newMap = new Map(prev);
+      newMap.delete(pageId);
+      return newMap;
     });
   };
 
@@ -624,6 +666,13 @@ function OrganizeEditorContent() {
       filePageIds.forEach((pageId) => newSet.delete(pageId));
       return newSet;
     });
+    
+    // Remove rotation data for deleted pages
+    setPageRotations((prev) => {
+      const newMap = new Map(prev);
+      filePageIds.forEach((pageId) => newMap.delete(pageId));
+      return newMap;
+    });
 
     // Update session data
     const sessionId = searchParams.get("session");
@@ -670,6 +719,7 @@ function OrganizeEditorContent() {
   const handleReset = () => {
     setFileObjects([]);
     setPages([]);
+    setPageRotations(new Map());
     if (downloadUrl) {
       URL.revokeObjectURL(downloadUrl);
     }
@@ -722,9 +772,11 @@ function OrganizeEditorContent() {
       const updatedFiles = [...fileObjects, ...newFiles];
       setFileObjects(updatedFiles);
 
-      // Extract pages from new files
-      const newPages = await extractPagesFromFiles(newFiles, fileObjects.length);
-      setPages((prev) => [...prev, ...newPages]);
+        // Extract pages from new files
+        const newPages = await extractPagesFromFiles(newFiles, fileObjects.length);
+        setPages((prev) => [...prev, ...newPages]);
+        
+        // Initialize rotations for new pages (already done in extractPagesFromFiles)
 
       // Update session data
       try {
@@ -874,9 +926,11 @@ function OrganizeEditorContent() {
                                 isProcessing={isProcessing}
                                 isDeleted={isDeleted}
                                 deleteMode={deleteMode}
+                                rotation={pageRotations.get(page.id) || 0}
                                 onToggleDelete={() => handleTogglePageDelete(page.id)}
                                 onPreview={() => handlePagePreview(page)}
                                 onRemove={() => handlePageRemove(page.id)}
+                                onRotate={() => handleRotatePage(page.id)}
                               />
                             );
                           })}

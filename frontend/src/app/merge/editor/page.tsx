@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowLeft, Zap, Plus, Trash2 } from "lucide-react";
+import { Loader2, ArrowLeft, Zap, Plus, Trash2, RotateCw } from "lucide-react";
 import { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 
@@ -12,6 +12,7 @@ import FilePreviewGrid from "@/components/FilePreviewGrid";
 import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
 import { indexedDBManager } from "@/utils/indexedDB";
+import { PDFDocument, degrees } from "pdf-lib";
 
 function MergeEditorContent() {
   const router = useRouter();
@@ -20,8 +21,14 @@ function MergeEditorContent() {
   const [downloadFileName, setDownloadFileName] = useState("pdf-merged");
   const [isLoading, setIsLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileRotations, setFileRotations] = useState<Map<string, number>>(new Map()); // Map<fileId, rotationAngle>
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [currentFile, setCurrentFile] = useState<{ current: number; total: number } | null>(null);
+  const [fileErrors, setFileErrors] = useState<Array<{ fileId: string; fileName: string; error: string }>>([]);
 
-  const { isProcessing, progress, downloadUrl, currentFile, fileErrors, mergeFiles, reset } = usePdfWorker();
+  const { reset } = usePdfWorker();
 
   // Load files dari sessionStorage dan IndexedDB
   useEffect(() => {
@@ -79,6 +86,12 @@ function MergeEditorContent() {
         }
 
         setFileObjects(loadedFiles);
+        // Initialize rotations for loaded files
+        const initialRotations = new Map<string, number>();
+        loadedFiles.forEach((file) => {
+          initialRotations.set(file.id, 0);
+        });
+        setFileRotations(initialRotations);
         setIsLoading(false);
       } catch (error) {
         console.error("Error loading files:", error);
@@ -89,23 +102,90 @@ function MergeEditorContent() {
     loadFiles();
   }, [searchParams, router]);
 
-  // Sync file errors dari worker ke fileObjects state
-  useEffect(() => {
-    if (fileErrors.length > 0) {
-      setFileObjects((prev) =>
-        prev.map((obj) => {
-          const error = fileErrors.find((e) => e.fileId === obj.id);
-          return error ? { ...obj, error: error.error } : obj;
-        })
-      );
-    }
-  }, [fileErrors]);
+
+  const handleRotateFile = (fileId: string) => {
+    setFileRotations((prev) => {
+      const newMap = new Map(prev);
+      const currentRotation = newMap.get(fileId) || 0;
+      const newRotation = (currentRotation + 90) % 360; // Rotate 90 degrees clockwise
+      newMap.set(fileId, newRotation);
+      return newMap;
+    });
+  };
 
   const handleMerge = async () => {
     if (fileObjects.length < 2) return;
     // Reset error state pada file objects
     setFileObjects((prev) => prev.map((obj) => ({ ...obj, error: undefined, isProcessing: false })));
-    await mergeFiles(fileObjects);
+    
+    // Merge dengan rotasi
+    setIsProcessing(true);
+    setProgress(0);
+    setDownloadUrl(null);
+    setFileErrors([]);
+    setCurrentFile(null);
+
+    try {
+      const mergedPdf = await PDFDocument.create();
+      const totalFiles = fileObjects.length;
+      let processedCount = 0;
+
+      for (let i = 0; i < totalFiles; i++) {
+        const fileObj = fileObjects[i];
+        const rotation = fileRotations.get(fileObj.id) || 0;
+
+        try {
+          // Get file from IndexedDB
+          const arrayBuffer = await indexedDBManager.getFile(fileObj.id);
+          
+          // Load PDF
+          const sourcePdf = await PDFDocument.load(arrayBuffer, {
+            ignoreEncryption: true,
+            capNumbers: true,
+          });
+
+          // Copy all pages
+          const pageIndices = sourcePdf.getPageIndices();
+          for (const pageIndex of pageIndices) {
+            const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
+            const newPage = mergedPdf.addPage(copiedPage);
+            
+            // Apply rotation if needed
+            if (rotation !== 0) {
+              const currentRotation = newPage.getRotation();
+              newPage.setRotation(degrees(currentRotation.angle + rotation));
+            }
+          }
+
+          processedCount++;
+          const progressValue = Math.round(((i + 1) / totalFiles) * 100);
+          setProgress(progressValue);
+          setCurrentFile({ current: processedCount, total: totalFiles });
+        } catch (error) {
+          console.error(`Error processing file ${fileObj.file.name}:`, error);
+          setFileErrors((prev) => [
+            ...prev,
+            { fileId: fileObj.id, fileName: fileObj.file.name, error: (error as Error).message || "Error tidak diketahui" }
+          ]);
+        }
+      }
+
+      if (mergedPdf.getPageCount() === 0) {
+        throw new Error("Tidak ada halaman yang berhasil digabungkan.");
+      }
+
+      // Save merged PDF
+      const mergedPdfBytes = await mergedPdf.save();
+      const blob = new Blob([mergedPdfBytes as unknown as BlobPart], { type: "application/pdf" });
+      setDownloadUrl(URL.createObjectURL(blob));
+      setProgress(100);
+      setIsProcessing(false);
+    } catch (error) {
+      console.error("Error merging files:", error);
+      alert("Error: " + (error as Error).message);
+      setIsProcessing(false);
+      setProgress(0);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -144,6 +224,12 @@ function MergeEditorContent() {
 
     // Hapus file dari state
     setFileObjects((prev) => prev.filter((o) => o.id !== id));
+    // Remove rotation data
+    setFileRotations((prev) => {
+      const newMap = new Map(prev);
+      newMap.delete(id);
+      return newMap;
+    });
 
     // Update session data
     const sessionId = searchParams.get("session");
@@ -180,6 +266,7 @@ function MergeEditorContent() {
 
   const handleReset = () => {
     setFileObjects([]);
+    setFileRotations(new Map());
     reset();
     router.push("/");
   };
@@ -236,6 +323,17 @@ function MergeEditorContent() {
 
       // Tambahkan ke state
       setFileObjects((prev) => [...prev, ...newFiles]);
+      
+      // Initialize rotation for new files
+      setFileRotations((prev) => {
+        const newMap = new Map(prev);
+        newFiles.forEach((file) => {
+          if (!newMap.has(file.id)) {
+            newMap.set(file.id, 0);
+          }
+        });
+        return newMap;
+      });
 
       // Update session data
       try {
@@ -270,6 +368,18 @@ function MergeEditorContent() {
       );
     }
   }, [isProcessing, currentFile]);
+
+  // Sync file errors ke fileObjects state
+  useEffect(() => {
+    if (fileErrors.length > 0) {
+      setFileObjects((prev) =>
+        prev.map((obj) => {
+          const error = fileErrors.find((e) => e.fileId === obj.id);
+          return error ? { ...obj, error: error.error } : obj;
+        })
+      );
+    }
+  }, [fileErrors]);
 
   if (isLoading) {
     return (
@@ -387,6 +497,8 @@ function MergeEditorContent() {
                   fileObjects={fileObjects}
                   onDragEnd={handleDragEnd}
                   onRemove={handleRemove}
+                  onRotate={handleRotateFile}
+                  fileRotations={fileRotations}
                   isProcessing={isProcessing}
                   currentFileIndex={currentFile ? currentFile.current - 1 : null}
                 />

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, FileText, X, Eye, Trash2 } from "lucide-react";
+import { GripVertical, FileText, X, Eye, Trash2, RotateCw } from "lucide-react";
 import PageThumbnail from "./PageThumbnail";
 
 export interface PageItem {
@@ -23,9 +23,11 @@ interface SortablePageItemProps {
   isProcessing?: boolean;
   isDeleted?: boolean;
   deleteMode?: boolean;
+  rotation?: number;
   onToggleDelete?: () => void;
   onPreview?: () => void;
   onRemove?: () => void;
+  onRotate?: () => void;
 }
 
 // Color palette for different files
@@ -130,9 +132,11 @@ export default function SortablePageItem({
   isProcessing = false,
   isDeleted = false,
   deleteMode = false,
+  rotation = 0,
   onToggleDelete,
   onPreview,
   onRemove,
+  onRotate,
 }: SortablePageItemProps) {
   const {
     attributes,
@@ -180,13 +184,18 @@ export default function SortablePageItem({
     >
       {/* Thumbnail Preview */}
       <div className="aspect-[3/4] bg-white dark:bg-slate-900 flex items-center justify-center relative min-h-[200px] overflow-hidden">
-        <PageThumbnail
-          fileId={page.fileId}
-          file={page.file}
-          pageNum={page.pageNumber}
-          scale={0.3}
+        <div 
           className="w-full h-full"
-        />
+          style={{ transform: `rotate(${rotation}deg)` }}
+        >
+          <PageThumbnail
+            fileId={page.fileId}
+            file={page.file}
+            pageNum={page.pageNumber}
+            scale={0.3}
+            className="w-full h-full"
+          />
+        </div>
 
         {/* Drag Indicator - Top Left (only show when not in delete mode) */}
         {!deleteMode && (
@@ -247,6 +256,28 @@ export default function SortablePageItem({
             onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            {onRotate && !deleteMode && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  onRotate();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                disabled={isProcessing}
+                className={`
+                  w-6 h-6 rounded-md flex items-center justify-center shadow-md transition-all
+                  ${isProcessing
+                    ? "bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-600 cursor-not-allowed"
+                    : "bg-white dark:bg-slate-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 cursor-pointer"
+                  }
+                `}
+                title="Rotasi halaman"
+              >
+                <RotateCw size={12} />
+              </button>
+            )}
             {onPreview && (
               <button
                 onClick={(e) => {
