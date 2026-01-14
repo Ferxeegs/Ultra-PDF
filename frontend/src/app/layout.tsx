@@ -16,15 +16,32 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "UltraPDF - Gabungkan PDF dengan Cepat dan Mudah ",
-  description: "Gabungkan dokumen PDF secara instan tanpa mengunggah file ke server. Cepat, privat, dan tanpa batas ukuran.",
+  title: "UltraPDF | Private & Secure PDF Tools",
+  description: "Kelola dokumen PDF Anda sepenuhnya di browser. Gabungkan, pisah, dan tanda tangani PDF dengan keamanan maksimal tanpa unggah file ke server.",
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
   },
   openGraph: {
-    title: "UltraPDF - Gabungkan PDF dengan Cepat dan Mudah",
-    description: "Gabungkan dokumen PDF secara instan tanpa mengunggah file ke server. Cepat, privat, dan tanpa batas ukuran.",
+    title: "UltraPDF | Private & Secure PDF Tools",
+    description: "Kelola dokumen PDF Anda sepenuhnya di browser. Gabungkan, pisah, dan tanda tangani PDF dengan keamanan maksimal tanpa unggah file ke server.",
+    url: 'https://ultrapdf.my.id',
+    siteName: 'UltraPDF',
+    locale: 'id_ID',
+    type: 'website',
   },
+  // Tambahan untuk tampilan lebih profesional di Twitter/X
+  // twitter: {
+  //   card: "summary_large_image",
+  //   title: "UltraPDF | Private & Secure PDF Tools",
+  //   description: "Edit PDF tanpa upload. Cepat, privat, dan aman.",
+  //   // images: ["/og-image.png"], // Jika Anda sudah punya gambar preview
+  // },
 };
 
 export default function RootLayout({
