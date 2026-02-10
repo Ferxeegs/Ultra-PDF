@@ -1,52 +1,35 @@
-import subprocess
 import os
 import logging
 import asyncio
 from pathlib import Path
+import img2pdf
 
 logger = logging.getLogger(__name__)
 
-# Timeout untuk Ghostscript command (dalam detik)
-GS_TIMEOUT = int(os.getenv("GS_TIMEOUT", "300"))  # 5 menit default
+PROCESS_TIMEOUT = int(os.getenv("PROCESS_TIMEOUT", "300"))
 
 
 class PDFService:
     @staticmethod
     def get_gs_settings(level: str):
-        """Mapping level kompresi ke preset Ghostscript"""
         settings = {
-            "low": "/screen",    # 72 dpi (Paling kecil)
-            "medium": "/ebook",   # 150 dpi (Standar)
-            "high": "/printer",  # 300 dpi (Kualitas tinggi)
+            "low": "/screen",
+            "medium": "/ebook",
+            "high": "/printer",
         }
         return settings.get(level, "/ebook")
 
     @staticmethod
     async def compress_pdf(input_path: str, output_path: str, quality: str = "medium"):
-        """
-        Compress PDF dengan validasi dan error handling yang lebih baik
-        
-        Args:
-            input_path: Path ke file PDF input
-            output_path: Path untuk file PDF output
-            quality: Level kompresi (low, medium, high)
-        
-        Returns:
-            bool: True jika berhasil, False jika gagal
-        """
-        # Validasi input path
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             return False
-        
-        # Validasi output directory
+
         output_dir = os.path.dirname(output_path)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
-        
+        os.makedirs(output_dir, exist_ok=True)
+
         gs_setting = PDFService.get_gs_settings(quality)
-        
-        # Ghostscript command dengan security flags tambahan
+
         gs_command = [
             "gs",
             "-sDEVICE=pdfwrite",
@@ -55,54 +38,100 @@ class PDFService:
             "-dNOPAUSE",
             "-dQUIET",
             "-dBATCH",
-            "-dSAFER",  # Security flag: disable file system access
-            "-dNOGC",   # Disable garbage collection untuk performa
-            "-dNOPLATFONTS",  # Disable platform fonts
-            "-dColorImageResolution=150",  # Limit image resolution
+            "-dSAFER",
+            "-dNOGC",
+            "-dNOPLATFONTS",
+            "-dColorImageResolution=150",
             "-dGrayImageResolution=150",
             "-dMonoImageResolution=150",
             f"-sOutputFile={output_path}",
-            input_path
+            input_path,
         ]
 
+        return await PDFService._execute_command(gs_command, "Compression")
+
+    @staticmethod
+    async def convert_docx_to_pdf(input_path: str, output_dir: str):
+        if not os.path.exists(input_path):
+            logger.error(f"Input file not found: {input_path}")
+            return None
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        command = [
+            "libreoffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            output_dir,
+            input_path,
+        ]
+
+        success = await PDFService._execute_command(command, "DOCX Conversion")
+
+        if success:
+            file_stem = Path(input_path).stem
+            expected_pdf_path = os.path.join(output_dir, f"{file_stem}.pdf")
+
+            if os.path.exists(expected_pdf_path):
+                logger.info(f"Conversion success: {expected_pdf_path}")
+                return expected_pdf_path
+
+        return None
+
+    @staticmethod
+    async def convert_image_to_pdf(input_paths: list[str], output_path: str):
+        if not input_paths:
+            logger.error("No input images provided")
+            return False
+
+        output_dir = os.path.dirname(output_path)
+        os.makedirs(output_dir, exist_ok=True)
+
         try:
-            # Run command dengan timeout untuk mencegah hang
+
+            def perform_conversion():
+                with open(output_path, "wb") as f:
+                    f.write(img2pdf.convert(input_paths))
+
+            await asyncio.to_thread(perform_conversion)
+
+            if os.path.exists(output_path):
+                logger.info(f"Image to PDF conversion success: {output_path}")
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Error during image to PDF conversion: {e}", exc_info=True)
+            return False
+
+    @staticmethod
+    async def _execute_command(command: list, task_name: str):
+        try:
             process = await asyncio.create_subprocess_exec(
-                *gs_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=1024 * 1024  # Limit output buffer to 1MB
+                *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=GS_TIMEOUT
+                    process.communicate(), timeout=PROCESS_TIMEOUT
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.error(f"Ghostscript timeout after {GS_TIMEOUT}s")
+                logger.error(f"{task_name} timeout after {PROCESS_TIMEOUT}s")
                 return False
-            
+
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown error"
-                logger.error(f"Ghostscript error: {error_msg}")
+                logger.error(
+                    f"{task_name} failed (exit {process.returncode}): {error_msg}"
+                )
                 return False
-            
-            # Validasi output file
-            if not os.path.exists(output_path):
-                logger.error("Output file was not created")
-                return False
-            
-            output_size = os.path.getsize(output_path)
-            if output_size == 0:
-                logger.error("Output file is empty")
-                return False
-            
-            logger.info(f"PDF compressed successfully: {input_path} -> {output_path}")
+
             return True
-            
+
         except Exception as e:
-            logger.error(f"Error during PDF compression: {e}", exc_info=True)
+            logger.error(f"Unexpected error during {task_name}: {e}", exc_info=True)
             return False
