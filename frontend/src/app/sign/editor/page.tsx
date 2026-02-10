@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, ArrowLeft, PenTool, Plus, X, Eye, FileText, GripVertical, Maximize2, Type } from "lucide-react";
+import { Loader2, ArrowLeft, PenTool, Plus, X, Eye, FileText, GripVertical, Maximize2, Type, RotateCw, RotateCcw } from "lucide-react";
 import { FileObject } from "@/types";
 import ProgressBar from "@/components/ProgressBar";
 import DownloadSection from "@/components/DownloadSection";
@@ -22,6 +22,7 @@ interface SignaturePosition {
   height: number; // PDF points
   pdfPageWidth: number; // PDF points
   pdfPageHeight: number; // PDF points
+  rotation?: number; // Rotation angle in degrees (default: 0)
 }
 
 // PDF Page Preview Component - Renders actual PDF page
@@ -37,10 +38,12 @@ function PagePreviewItem({
   onSignatureMove,
   onSignatureResize,
   onSignatureRemove,
+  onSignatureRotate,
   onTextMove,
   onTextResize,
   onTextRemove,
   onTextClick,
+  onTextRotate,
   onDragOver,
   signatureAspectRatio,
 }: {
@@ -55,10 +58,12 @@ function PagePreviewItem({
   onSignatureMove: (id: string, x: number, y: number) => void;
   onSignatureResize: (id: string, width: number, height: number) => void;
   onSignatureRemove: (id: string) => void;
+  onSignatureRotate: (id: string, rotation: number) => void;
   onTextMove: (id: string, x: number, y: number) => void;
   onTextResize: (id: string, fontSize: number) => void;
   onTextRemove: (id: string) => void;
   onTextClick: (id: string, position: { x: number; y: number }) => void;
+  onTextRotate: (id: string, rotation: number) => void;
   onDragOver?: (e: React.DragEvent, pdfOriginalSize: { width: number; height: number }, scaleFactor: number) => void;
   signatureAspectRatio: number | null;
 }) {
@@ -381,10 +386,13 @@ function PagePreviewItem({
                       top: `${canvasOffsetY + browserY}px`,
                       width: `${browserWidth}px`,
                       height: `${browserHeight}px`,
+                      transform: `rotate(${pos.rotation || 0}deg)`,
+                      transformOrigin: 'center center',
                     }}
                     onMouseDown={(e) => {
-                      // Don't start drag if clicking on resize handle
-                      if ((e.target as HTMLElement).closest('.resize-handle')) {
+                      // Don't start drag if clicking on resize handle or rotate handle
+                      if ((e.target as HTMLElement).closest('.resize-handle') || 
+                          (e.target as HTMLElement).closest('.rotate-handle')) {
                         return;
                       }
                       e.stopPropagation();
@@ -441,6 +449,52 @@ function PagePreviewItem({
                         >
                           <X size={16} strokeWidth={2.5} />
                         </button>
+                        {/* Rotation handle - drag to rotate */}
+                        <div
+                          className="rotate-handle absolute -top-2.5 -left-2.5 w-7 h-7 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white rounded-full flex items-center justify-center opacity-0 group-hover/sig:opacity-100 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 active:scale-95 z-20 border-2 border-white dark:border-slate-900 cursor-grab active:cursor-grabbing"
+                          title="Drag untuk rotasi"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            
+                            // Get center of signature element
+                            const rect = e.currentTarget.closest('.group\\/sig')?.getBoundingClientRect();
+                            if (!rect) return;
+                            
+                            const centerX = rect.left + rect.width / 2;
+                            const centerY = rect.top + rect.height / 2;
+                            const startRotation = pos.rotation || 0;
+                            
+                            // Calculate initial angle
+                            const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI);
+                            
+                            const handleMouseMove = (moveEvent: MouseEvent) => {
+                              // Calculate current angle
+                              const currentAngle = Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX) * (180 / Math.PI);
+                              
+                              // Calculate rotation delta
+                              let deltaAngle = currentAngle - startAngle;
+                              
+                              // Normalize to -180 to 180
+                              if (deltaAngle > 180) deltaAngle -= 360;
+                              if (deltaAngle < -180) deltaAngle += 360;
+                              
+                              // Apply rotation
+                              const newRotation = (startRotation + deltaAngle + 360) % 360;
+                              onSignatureRotate(pos.id, newRotation);
+                            };
+                            
+                            const handleMouseUp = () => {
+                              document.removeEventListener('mousemove', handleMouseMove);
+                              document.removeEventListener('mouseup', handleMouseUp);
+                            };
+                            
+                            document.addEventListener('mousemove', handleMouseMove);
+                            document.addEventListener('mouseup', handleMouseUp);
+                          }}
+                        >
+                          <RotateCw size={14} strokeWidth={2.5} />
+                        </div>
                         {/* Resize handle */}
                         <div
                           className="resize-handle absolute -bottom-2 -right-2 w-6 h-6 bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-500 active:bg-blue-700 dark:active:bg-blue-700 border-2 border-white dark:border-slate-900 rounded-md opacity-0 group-hover/sig:opacity-100 transition-all duration-200 cursor-nwse-resize z-20 flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 active:scale-95"
@@ -550,10 +604,13 @@ function PagePreviewItem({
                     style={{
                       left: `${canvasOffsetX + browserX}px`,
                       top: `${canvasOffsetY + browserY}px`,
+                      transform: `rotate(${textPos.rotation || 0}deg)`,
+                      transformOrigin: 'top left',
                     }}
                     onMouseDown={(e) => {
-                      // Don't start drag if clicking on resize handle
-                      if ((e.target as HTMLElement).closest('.text-resize-handle')) {
+                      // Don't start drag if clicking on resize handle or rotate handle
+                      if ((e.target as HTMLElement).closest('.text-resize-handle') || 
+                          (e.target as HTMLElement).closest('.text-rotate-handle')) {
                         return;
                       }
                       e.stopPropagation();
@@ -631,6 +688,52 @@ function PagePreviewItem({
                     >
                       <X size={16} strokeWidth={2.5} />
                     </button>
+                    {/* Rotation handle - drag to rotate */}
+                    <div
+                      className="text-rotate-handle absolute -top-2.5 -left-2.5 w-7 h-7 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white rounded-full flex items-center justify-center opacity-0 group-hover/text:opacity-100 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-110 active:scale-95 z-20 border-2 border-white dark:border-slate-900 cursor-grab active:cursor-grabbing"
+                      title="Drag untuk rotasi"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        
+                        // Get center of text element
+                        const rect = e.currentTarget.closest('.group\\/text')?.getBoundingClientRect();
+                        if (!rect) return;
+                        
+                        const centerX = rect.left + rect.width / 2;
+                        const centerY = rect.top + rect.height / 2;
+                        const startRotation = textPos.rotation || 0;
+                        
+                        // Calculate initial angle
+                        const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI);
+                        
+                        const handleMouseMove = (moveEvent: MouseEvent) => {
+                          // Calculate current angle
+                          const currentAngle = Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX) * (180 / Math.PI);
+                          
+                          // Calculate rotation delta
+                          let deltaAngle = currentAngle - startAngle;
+                          
+                          // Normalize to -180 to 180
+                          if (deltaAngle > 180) deltaAngle -= 360;
+                          if (deltaAngle < -180) deltaAngle += 360;
+                          
+                          // Apply rotation
+                          const newRotation = (startRotation + deltaAngle + 360) % 360;
+                          onTextRotate(textPos.id, newRotation);
+                        };
+                        
+                        const handleMouseUp = () => {
+                          document.removeEventListener('mousemove', handleMouseMove);
+                          document.removeEventListener('mouseup', handleMouseUp);
+                        };
+                        
+                        document.addEventListener('mousemove', handleMouseMove);
+                        document.addEventListener('mouseup', handleMouseUp);
+                      }}
+                    >
+                      <RotateCw size={14} strokeWidth={2.5} />
+                    </div>
                     {/* Resize handle (bottom-right corner) */}
                     <div
                       className="text-resize-handle absolute -bottom-2 -right-2 w-6 h-6 bg-blue-500 dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-500 active:bg-blue-700 dark:active:bg-blue-700 border-2 border-white dark:border-slate-900 rounded-md opacity-0 group-hover/text:opacity-100 transition-all duration-200 cursor-nwse-resize z-20 flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 active:scale-95"
@@ -1339,6 +1442,38 @@ function SignEditorContent() {
     });
   };
 
+  const handleSignatureRotate = (id: string, rotation: number) => {
+    setSignaturePositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [key, positions] of newMap.entries()) {
+        const updated = positions.map((pos) =>
+          pos.id === id ? { ...pos, rotation } : pos
+        );
+        if (updated.some((p) => p.id === id)) {
+          newMap.set(key, updated);
+          break;
+        }
+      }
+      return newMap;
+    });
+  };
+
+  const handleTextRotate = (id: string, rotation: number) => {
+    setTextPositions((prev) => {
+      const newMap = new Map(prev);
+      for (const [key, positions] of newMap.entries()) {
+        const updated = positions.map((pos) =>
+          pos.id === id ? { ...pos, rotation } : pos
+        );
+        if (updated.some((p) => p.id === id)) {
+          newMap.set(key, updated);
+          break;
+        }
+      }
+      return newMap;
+    });
+  };
+
   // Text handlers
   const handleTextMove = (id: string, x: number, y: number) => {
     setTextPositions((prev) => {
@@ -1554,6 +1689,44 @@ function SignEditorContent() {
         let signatureImage: any = null;
         let signatureAspectRatioLocal: number | null = null;
 
+        // Helper function to rotate image using canvas
+        const rotateImage = async (imageDataUrl: string, rotation: number): Promise<string> => {
+          if (rotation === 0) return imageDataUrl;
+          
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                resolve(imageDataUrl);
+                return;
+              }
+              
+              const rotationRad = (rotation * Math.PI) / 180;
+              const cos = Math.abs(Math.cos(rotationRad));
+              const sin = Math.abs(Math.sin(rotationRad));
+              
+              // Calculate new canvas size to fit rotated image
+              const newWidth = img.width * cos + img.height * sin;
+              const newHeight = img.width * sin + img.height * cos;
+              
+              canvas.width = newWidth;
+              canvas.height = newHeight;
+              
+              // Rotate and draw
+              ctx.save();
+              ctx.translate(newWidth / 2, newHeight / 2);
+              ctx.rotate(rotationRad);
+              ctx.drawImage(img, -img.width / 2, -img.height / 2);
+              ctx.restore();
+              
+              resolve(canvas.toDataURL('image/png'));
+            };
+            img.src = imageDataUrl;
+          });
+        };
+
         if (sessionSignature) {
           signatureImage = await pdfDoc.embedPng(sessionSignature);
           // Get original signature dimensions to calculate aspect ratio
@@ -1574,6 +1747,14 @@ function SignEditorContent() {
           for (const position of allPositions) {
             const page = pdfDoc.getPage(position.pageNumber - 1);
             const { width: pageWidth, height: pageHeight } = page.getSize();
+            
+            // Rotate signature image if needed
+            let imageToDraw = signatureImage;
+            const rotation = position.rotation || 0;
+            if (rotation !== 0 && sessionSignature) {
+              const rotatedImageDataUrl = await rotateImage(sessionSignature, rotation);
+              imageToDraw = await pdfDoc.embedPng(rotatedImageDataUrl);
+            }
 
             // Positions are already in PDF points, use them directly
             // But we need to handle Y-axis: PDF starts from bottom-left, our coordinates are top-left
@@ -1602,7 +1783,8 @@ function SignEditorContent() {
             
             const pdfY = pageHeight - position.y - finalHeight;
 
-            page.drawImage(signatureImage, {
+            // Draw rotated image (rotation already applied to imageToDraw above)
+            page.drawImage(imageToDraw, {
               x: pdfX,
               y: pdfY,
               width: finalWidth,
@@ -1619,7 +1801,7 @@ function SignEditorContent() {
           }
         }
 
-        // Function to rasterize text to canvas with DPI and blur
+        // Function to rasterize text to canvas with DPI, blur, and rotation
         const rasterizeText = async (
           text: string,
           fontSize: number,
@@ -1628,7 +1810,8 @@ function SignEditorContent() {
           opacity: number,
           dpi: number = 300,
           blur: number = 0,
-          padding: number = 20
+          padding: number = 20,
+          rotation: number = 0
         ): Promise<string> => {
           // Create offscreen canvas for rasterization
           const canvas = document.createElement('canvas');
@@ -1663,8 +1846,17 @@ function SignEditorContent() {
           // Use actualHeight for precision, but ensure minimum height for line-height consistency
           const minTextHeight = canvasFontSize; // Minimum height based on font size
           const textHeight = Math.max(actualHeight, minTextHeight);
-          canvas.width = Math.ceil(textWidth + (padding * 2));
-          canvas.height = Math.ceil(textHeight + (padding * 2));
+          
+          // Calculate canvas size accounting for rotation
+          // When rotated, we need extra space to fit the rotated text
+          const rotationRad = (rotation * Math.PI) / 180;
+          const cos = Math.abs(Math.cos(rotationRad));
+          const sin = Math.abs(Math.sin(rotationRad));
+          const rotatedWidth = textWidth * cos + textHeight * sin;
+          const rotatedHeight = textWidth * sin + textHeight * cos;
+          
+          canvas.width = Math.ceil(rotatedWidth + (padding * 2));
+          canvas.height = Math.ceil(rotatedHeight + (padding * 2));
 
           // Clear canvas with transparent background
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1687,8 +1879,26 @@ function SignEditorContent() {
           ctx.textBaseline = 'top';
           ctx.textAlign = 'left';
 
-          // Draw text with padding offset (top-left corner at padding, padding)
-          ctx.fillText(text, padding, padding);
+          // Apply rotation if needed
+          if (rotation !== 0) {
+            // Calculate center of text area
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Translate to center, rotate, translate back
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(rotationRad);
+            ctx.translate(-centerX, -centerY);
+            
+            // Draw text centered
+            ctx.fillText(text, (canvas.width - textWidth) / 2, (canvas.height - textHeight) / 2);
+            
+            ctx.restore();
+          } else {
+            // Draw text with padding offset (top-left corner at padding, padding)
+            ctx.fillText(text, padding, padding);
+          }
 
           // Reset filter
           ctx.filter = 'none';
@@ -1716,7 +1926,8 @@ function SignEditorContent() {
             textPos.opacity, 
             renderDpi, 
             textPos.blur || 0,
-            canvasPadding // Pass padding to function
+            canvasPadding, // Pass padding to function
+            textPos.rotation || 0 // Pass rotation
           );
           const base64Data = textImageDataUrl.split(',')[1];
           const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
@@ -2035,10 +2246,12 @@ function SignEditorContent() {
                                   onSignatureMove={handleSignatureMove}
                                   onSignatureResize={handleSignatureResize}
                                   onSignatureRemove={handleSignatureRemove}
+                                  onSignatureRotate={handleSignatureRotate}
                                   onTextMove={handleTextMove}
                                   onTextResize={handleTextResize}
                                   onTextRemove={handleTextRemove}
                                   onTextClick={handleTextClick}
+                                  onTextRotate={handleTextRotate}
                                   signatureAspectRatio={signatureAspectRatio}
                                 />
                               </div>

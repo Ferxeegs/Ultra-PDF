@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { X, Palette, Type, SlidersHorizontal, Copy } from "lucide-react";
+import { X, Palette, Type, SlidersHorizontal, Copy, RotateCw, RotateCcw } from "lucide-react";
 
 export interface TextPosition {
   id: string;
@@ -18,6 +18,7 @@ export interface TextPosition {
   pdfPageHeight: number; // PDF points
   dpi?: number; // DPI untuk rasterisasi (default: 150)
   blur?: number; // Blur radius dalam pixels (default: 0)
+  rotation?: number; // Rotation angle in degrees (default: 0)
 }
 
 interface TextToolbarProps {
@@ -44,6 +45,7 @@ export default function TextToolbar({
   const [localFontSize, setLocalFontSize] = useState(textPosition.fontSize);
   const [localDpi, setLocalDpi] = useState(textPosition.dpi || 150);
   const [localBlur, setLocalBlur] = useState(textPosition.blur || 0);
+  const [localRotation, setLocalRotation] = useState(textPosition.rotation || 0);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
   // Update local state when textPosition changes
@@ -55,6 +57,7 @@ export default function TextToolbar({
     setLocalFontSize(textPosition.fontSize);
     setLocalDpi(textPosition.dpi || 150);
     setLocalBlur(textPosition.blur || 0);
+    setLocalRotation(textPosition.rotation || 0);
   }, [textPosition]);
 
   // Convert HEX to RGB
@@ -312,6 +315,85 @@ export default function TextToolbar({
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
           Tambahkan blur ringan untuk menyamakan dengan dokumen scan
         </p>
+      </div>
+
+      {/* Rotation Controls */}
+      <div className="mb-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-2">
+          <RotateCw size={14} />
+          Rotasi: {localRotation}°
+        </label>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const newRotation = (localRotation - 15 + 360) % 360;
+              setLocalRotation(newRotation);
+              handleUpdate({ rotation: newRotation });
+            }}
+            className="p-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded transition-colors"
+            title="Rotasi 15° ke kiri"
+          >
+            <RotateCcw size={18} className="text-blue-600 dark:text-blue-400" />
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="360"
+            step="1"
+            value={localRotation}
+            onChange={(e) => {
+              const rotation = parseInt(e.target.value);
+              setLocalRotation(rotation);
+              handleUpdate({ rotation });
+            }}
+            className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          />
+          <button
+            onClick={() => {
+              const newRotation = (localRotation + 15) % 360;
+              setLocalRotation(newRotation);
+              handleUpdate({ rotation: newRotation });
+            }}
+            className="p-2 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded transition-colors"
+            title="Rotasi 15° ke kanan"
+          >
+            <RotateCw size={18} className="text-blue-600 dark:text-blue-400" />
+          </button>
+          <span className="text-xs text-slate-500 dark:text-slate-400 w-12 text-right">
+            {localRotation}°
+          </span>
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={() => {
+              setLocalRotation(0);
+              handleUpdate({ rotation: 0 });
+            }}
+            className="flex-1 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded transition-colors"
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => {
+              const newRotation = (localRotation + 90) % 360;
+              setLocalRotation(newRotation);
+              handleUpdate({ rotation: newRotation });
+            }}
+            className="flex-1 px-3 py-1.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded transition-colors"
+          >
+            +90°
+          </button>
+          <button
+            onClick={() => {
+              const newRotation = (localRotation + 180) % 360;
+              setLocalRotation(newRotation);
+              handleUpdate({ rotation: newRotation });
+            }}
+            className="flex-1 px-3 py-1.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded transition-colors"
+          >
+            +180°
+          </button>
+        </div>
       </div>
     </div>
   );
