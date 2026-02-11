@@ -34,7 +34,7 @@ export default function Navbar() {
   }, []);
 
   const navItems = [
-    { name: "Merge", href: "/", icon: FileText },
+    { name: "Merge", href: "/merge", icon: FileText },
     { name: "Split", href: "/split", icon: Scissors },
     { name: "Word to PDF", href: "/docx-to-pdf", icon: FileCode },
     { name: "Image to PDF", href: "/image-to-pdf", icon: ImageIcon },
