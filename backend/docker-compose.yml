@@ -1,21 +1,23 @@
-version: '3.8'
-
 services:
   api:
     build: .
     container_name: ultrapdf-backend
-    # Volume mapping: Menghubungkan folder lokal dengan folder di dalam Docker
     volumes:
       - .:/app
-      # Pastikan folder uploads dan outputs tetap ada
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
+    # Port 8000:8000 opsional jika sudah pakai Nginx, 
+    # tapi boleh tetap ada untuk akses langsung via IP:8000
     ports:
       - "8000:8000"
     environment:
       - ENV=development
       - PORT=8000
-    # Menggunakan 'uv run' untuk menjalankan uvicorn
-    # --reload: otomatis update saat kode berubah (cocok untuk development)
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 30
     restart: always
+    networks:
+      - app-bridge
+
+networks:
+  app-bridge:
+    external: true
