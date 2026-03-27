@@ -10,6 +10,7 @@ export const API_ENDPOINTS = {
   convertDocx: `${API_BASE_URL}/api/v1/convert-docx`,
   convertPpt: `${API_BASE_URL}/api/v1/convert-ppt`,
   convertImage: `${API_BASE_URL}/api/v1/convert-image`,
+  removeBg: `${API_BASE_URL}/api/v1/remove-bg`,
 } as const;
 
 // Tipe data untuk kualitas kompresi

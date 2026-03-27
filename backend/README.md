@@ -5,6 +5,7 @@ Backend untuk aplikasi UltraPDF, menyediakan layanan kompresi dan konversi PDF y
 ## 🚀 Fitur Utama
 
 - **Konversi Dokumen**: Mengubah gambar (JPG, PNG) dan dokumen Office ke PDF.
+- **Remove Background Gambar**: Menghapus background gambar menjadi PNG transparan menggunakan `rembg` (U2-Net).
 - **Kompresi PDF**: Optimasi ukuran file PDF dengan berbagai tingkat kompresi.
 - **Keamanan**: Dilengkapi dengan Security Headers, Rate Limiting, dan validasi input yang ketat.
 - **Kinerja Tinggi**: Menggunakan `uv` untuk manajemen dependensi yang cepat dan efisien.
@@ -88,7 +89,33 @@ PDF hasil LibreOffice di-refine menggunakan Ghostscript dengan setting `/prepres
    ALLOWED_ORIGINS=http://localhost:3000
    UPLOAD_DIR=uploads
    OUTPUT_DIR=outputs
+   # Gunakan model yang sudah tersedia lokal di folder .u2net
+   REMBG_MODEL_NAME=u2net
+   # Batas sisi terpanjang input sebelum inferensi (otomatis di-resize)
+   REMBG_MAX_SIDE=1600
+   # Default: CPU (aman). Untuk GPU CUDA, pasang onnxruntime-gpu lalu set:
+   REMBG_USE_CUDA=0
    ```
+
+### Remove background: `net::ERR_EMPTY_RESPONSE` di browser
+
+Artinya **koneksi ke backend terputus tanpa respons HTTP** — biasanya proses Python/Uvicorn **crash** saat inferensi (bukan error JSON 500). Penyebab umum:
+
+- **`onnxruntime-gpu` + driver/CUDA/cuDNN tidak cocok** → native crash (segfault). **Solusi:** pakai `onnxruntime` (CPU) seperti di `pyproject.toml` saat ini, atau pastikan stack CUDA sesuai versi wheel GPU.
+- **OOM** (model besar / RAM kecil) → proses dibunuh oleh OS.
+- **Request pertama** mengunduh model (bisa lama); jika container/proses mati di tengah, browser bisa terlihat seperti empty response.
+
+**GPU (opsional):** uninstall `onnxruntime`, install `onnxruntime-gpu` yang cocok dengan CUDA Anda, lalu set `REMBG_USE_CUDA=1`. Tanpa itu, biarkan default CPU.
+
+### Remove background: gagal download model dari GitHub
+
+Jika container tidak punya akses DNS/Internet, rembg tidak bisa auto-download model. Pastikan file model sudah ada secara lokal di `backend/.u2net/` dan dipasang sebagai volume ke `/app/.u2net`.
+
+Minimal salah satu file berikut harus ada:
+- `u2net.onnx` (disarankan)
+- `u2netp.onnx`
+
+Jika tetap gagal resolve domain dari dalam container, tambahkan DNS resolver publik di `docker-compose.yml` (contoh: `1.1.1.1`, `8.8.8.8`) lalu rebuild/restart service.
 
 4. **Jalankan Aplikasi**
    ```bash

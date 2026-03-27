@@ -16,6 +16,7 @@ ENV UV_LINK_MODE=copy
 # Kita hapus UV_PROJECT_ENVIRONMENT="/usr/local"
 # Sebagai gantinya, tambahkan path .venv ke PATH sistem agar 'python' dan 'uvicorn' langsung terbaca
 ENV PATH="/app/.venv/bin:$PATH"
+ENV U2NET_HOME="/app/.u2net"
 
 # Tentukan direktori kerja
 WORKDIR /app
@@ -26,6 +27,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     libmagic1 \
+    libglib2.0-0 \
+    libgl1 \
     libreoffice \
     fonts-liberation \
     fonts-noto \
@@ -40,8 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml uv.lock README.md* ./
 
 # 5. Instal dependensi menggunakan uv
-# uv akan otomatis membuat virtual environment di /app/.venv
-RUN uv sync --frozen --no-install-project --no-dev
+# --frozen dilepas agar perubahan dependency (mis. rembg) tidak gagal saat build.
+RUN uv sync --no-install-project --no-dev
 
 # 6. Copy seluruh isi proyek ke dalam kontainer (termasuk folder fonts jika ada)
 COPY . .

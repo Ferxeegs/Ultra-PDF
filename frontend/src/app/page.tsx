@@ -15,7 +15,8 @@ import {
   MousePointer2,
   ArrowRight,
   Sparkles,
-  Infinity
+  Infinity,
+  Eraser
 } from "lucide-react";
 import Footer from "@/components/Footer";
 
@@ -59,6 +60,16 @@ export default function Home() {
       color: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-50 dark:bg-emerald-900/30",
       hoverBg: "bg-emerald-100 dark:bg-emerald-900/50",
+      isNew: true,
+    },
+    {
+      name: "Remove Background",
+      desc: "Hapus background gambar otomatis dan unduh hasil PNG transparan untuk desain atau produk.",
+      href: "/remove-bg",
+      icon: Eraser,
+      color: "text-fuchsia-600 dark:text-fuchsia-400",
+      bg: "bg-fuchsia-50 dark:bg-fuchsia-900/30",
+      hoverBg: "bg-fuchsia-100 dark:bg-fuchsia-900/50",
       isNew: true,
     },
     {

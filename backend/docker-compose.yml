@@ -6,13 +6,20 @@ services:
       - .:/app
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
+      - ./.u2net:/app/.u2net
     # Port 8000:8000 opsional jika sudah pakai Nginx, 
     # tapi boleh tetap ada untuk akses langsung via IP:8000
     ports:
       - "8000:8000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       - ENV=development
       - PORT=8000
+      - REMBG_MODEL_NAME=u2net
+      - REMBG_MAX_SIDE=1600
+      - REMBG_USE_CUDA=0
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 30
     restart: always
     networks:

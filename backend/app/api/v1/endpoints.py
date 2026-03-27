@@ -16,6 +16,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from app.services.pdf_service import PDFService
+from app.services.image_service import ImageService
 from app.utils.security import (
     validate_file_size,
     validate_file_extension,
@@ -359,3 +360,79 @@ async def convert_image_to_pdf_endpoint(
         if not isinstance(e, HTTPException):
             raise HTTPException(status_code=500, detail="Internal server error")
         raise e
+
+
+@router.post("/remove-bg")
+@limiter.limit("10/minute")
+async def remove_image_background(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        raise HTTPException(
+            status_code=400, detail="Only .jpg, .jpeg, .png, and .webp are allowed"
+        )
+
+    file_id = str(uuid.uuid4())
+    max_size = int(os.getenv("MAX_IMAGE_SIZE_MB", "20")) * 1024 * 1024
+    sanitized_filename = sanitize_filename(file.filename)
+
+    try:
+        input_path = get_safe_file_path(UPLOAD_DIR, f"{file_id}{ext}")
+        output_path = get_safe_file_path(OUTPUT_DIR, f"removed_bg_{file_id}.png")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_size = 0
+
+    try:
+        chunk_size = 4 * 1024 * 1024
+        with open(input_path, "wb", buffering=8 * 1024 * 1024) as buffer:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > max_size:
+                    buffer.close()
+                    remove_file(input_path)
+                    raise HTTPException(
+                        status_code=413, detail="Image file exceeds maximum limit"
+                    )
+                buffer.write(chunk)
+
+        if not validate_file_size(file_size):
+            remove_file(input_path)
+            raise HTTPException(status_code=413, detail="File size validation failed")
+
+        if not validate_file_content(input_path):
+            remove_file(input_path)
+            raise HTTPException(status_code=400, detail="Invalid image content")
+
+        with open(input_path, "rb") as image_file:
+            result_bytes = await ImageService.remove_background(image_file.read())
+
+        with open(output_path, "wb") as out:
+            out.write(result_bytes)
+
+    except Exception as e:
+        remove_file(input_path)
+        remove_file(output_path)
+        if not isinstance(e, HTTPException):
+            logger.error("Remove background failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to remove background")
+        raise e
+
+    background_tasks.add_task(remove_file, input_path)
+    background_tasks.add_task(remove_file, output_path)
+
+    return FileResponse(
+        path=output_path,
+        filename=f"{Path(sanitized_filename).stem}-transparent.png",
+        media_type="image/png",
+    )

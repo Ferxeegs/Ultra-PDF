@@ -14,6 +14,7 @@ import {
   PenTool,
   FileCode,
   Image as ImageIcon,
+  Eraser,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -36,6 +37,7 @@ export default function Navbar() {
     { name: "Split", href: "/split", icon: Scissors },
     { name: "Word to PDF", href: "/docx-to-pdf", icon: FileCode },
     { name: "Image to PDF", href: "/image-to-pdf", icon: ImageIcon },
+    { name: "Remove BG", href: "/remove-bg", icon: Eraser },
     { name: "Organize", href: "/organize", icon: Grid3x3 },
     { name: "Sign", href: "/sign", icon: PenTool },
     { name: "Compress", href: "/compress", icon: Zap },
