@@ -17,6 +17,52 @@ Sebelum memulai, pastikan sistem Anda memiliki:
 - **Python 3.11+**
 - **[uv](https://github.com/astral-sh/uv)** (Package manager Python modern yang sangat cepat)
 - **Ghostscript** & **LibreOffice** (Untuk pemrosesan dokumen, sudah tersedia di Docker image)
+- **Font Dasar** (Untuk konversi PPT/Word ke PDF, sudah tersedia di Docker image)
+
+### ⚠️ Catatan Penting: Font untuk Konversi PPT/Word dengan Presisi Tinggi
+
+Saat mengonversi PPT atau Word ke PDF, masalah yang paling sering muncul adalah **Font Missing** yang menyebabkan teks berantakan atau posisi bergeser. Sistem ini telah dioptimasi dengan 3 strategi untuk presisi maksimal:
+
+#### 1. **Font Microsoft (Wajib untuk Presisi Tinggi)**
+
+**Metode Terbaik: Copy Font dari Windows (Rekomendasi)**
+1. Salin folder `C:\Windows\Fonts` dari komputer Windows Anda
+2. Buat folder `fonts/` di root direktori `backend/`
+3. Paste semua file font (.ttf, .ttc, .otf) ke dalam folder `fonts/`
+4. Rebuild Docker image - font akan otomatis terdeteksi dan diinstall
+
+**Metode Alternatif: Install via Package Manager**
+```bash
+# Di Dockerfile akan otomatis mencoba install ttf-mscorefonts-installer
+# Jika gagal, akan fallback ke fonts-liberation
+```
+
+**Di Server Ubuntu/Debian (Manual, tanpa Docker):**
+```bash
+sudo apt-get update
+sudo apt-get install -y fonts-liberation fonts-noto fonts-noto-cjk fontconfig
+
+# Untuk font Microsoft (opsional, terkadang sulit di-install)
+echo "ttf-mscorefonts-installer ttf-mscorefonts-installer/accepted-mscorefonts-eula boolean true" | sudo debconf-set-selections
+sudo apt-get install -y ttf-mscorefonts-installer || echo "Installation skipped"
+sudo fc-cache -f -v
+```
+
+#### 2. **Isolated User Profile (Mencegah Race Condition)**
+
+Setiap konversi menggunakan user profile LibreOffice yang unik untuk mencegah konflik saat multiple request berjalan bersamaan. Profile akan otomatis dibersihkan setelah konversi selesai.
+
+#### 3. **Post-Processing dengan Ghostscript (Embed Fonts)**
+
+PDF hasil LibreOffice di-refine menggunakan Ghostscript dengan setting `/prepress` untuk:
+- Embed semua font dengan benar
+- Memastikan font subsetting optimal
+- Kualitas gambar tinggi (300 DPI)
+
+**Font yang terinstall akan memastikan:**
+- ✅ Ukuran teks (kerning/spacing) sama persis dengan dokumen asli
+- ✅ Tidak ada font substitution yang mengubah layout
+- ✅ Presisi tinggi untuk dokumen yang menggunakan Calibri, Arial, Times New Roman, Segoe UI, dll
 
 ## 🛠️ Instalasi & Menjalankan (Local)
 

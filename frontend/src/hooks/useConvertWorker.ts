@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { API_ENDPOINTS } from "@/utils/api";
 
 interface ConvertOptions {
-    type: 'docx' | 'image';
+    type: 'docx' | 'ppt' | 'image';
 }
 
 export function useConvertWorker() {
@@ -27,13 +27,23 @@ export function useConvertWorker() {
         try {
             const formData = new FormData();
             const isDocx = options.type === 'docx';
-            const endpoint = isDocx ? API_ENDPOINTS.convertDocx : API_ENDPOINTS.convertImage;
+            const isPpt = options.type === 'ppt';
+            const isImage = options.type === 'image';
+            
+            let endpoint: string;
+            if (isDocx) {
+                endpoint = API_ENDPOINTS.convertDocx;
+            } else if (isPpt) {
+                endpoint = API_ENDPOINTS.convertPpt;
+            } else {
+                endpoint = API_ENDPOINTS.convertImage;
+            }
 
-            if (isDocx && !Array.isArray(files)) {
-                // Docx biasanya hanya satu file
+            if ((isDocx || isPpt) && !Array.isArray(files)) {
+                // Docx/PPT biasanya hanya satu file
                 formData.append("file", files);
-                setProgressMessage("Mengupload dokumen...");
-            } else if (!isDocx && Array.isArray(files)) {
+                setProgressMessage(isPpt ? "Mengupload presentasi..." : "Mengupload dokumen...");
+            } else if (isImage && Array.isArray(files)) {
                 // UNTUK IMAGE: Coba gunakan key "files" jika "file" hanya terbaca satu
                 // Jika backend kamu kaku menggunakan "file", ganti kembali ke "file"
                 files.forEach((f) => {

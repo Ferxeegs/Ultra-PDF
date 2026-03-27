@@ -1,9 +1,32 @@
-__pycache__
-*.pyc
-.env
+# Virtual Environment (Sangat Penting)
+.venv
+venv
+env
+ENV
+
+# Python build & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache
+.uv
+
+# App Data (Sesuai project UltraPDF kamu)
+uploads/
+outputs/
+temp/
+
+# Font folder harus di-include (jika ada)
+# Jangan ignore fonts/ karena diperlukan untuk presisi konversi PPT/Word
+!fonts/
+
+# Metadata & IDE
 .git
 .gitignore
-venv
 .vscode
-uploads/*
-outputs/*
+.idea
+.DS_Store
+
+# Docker logs
+*.log
+docker-compose.override.yml

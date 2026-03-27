@@ -8,6 +8,7 @@ export const API_ENDPOINTS = {
 
   // Endpoint baru untuk konversi dokumen dan gambar sesuai spesifikasi API
   convertDocx: `${API_BASE_URL}/api/v1/convert-docx`,
+  convertPpt: `${API_BASE_URL}/api/v1/convert-ppt`,
   convertImage: `${API_BASE_URL}/api/v1/convert-image`,
 } as const;
 
