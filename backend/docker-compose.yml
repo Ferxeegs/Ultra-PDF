@@ -17,9 +17,13 @@ services:
     environment:
       - ENV=development
       - PORT=8000
-      - REMBG_MODEL_NAME=u2net
+      - REMBG_MODEL_NAME=isnet-general-use
       - REMBG_MAX_SIDE=1600
       - REMBG_USE_CUDA=0
+      - REMBG_ALPHA_MATTING=1
+      - REMBG_ALPHA_FOREGROUND_THRESHOLD=240
+      - REMBG_ALPHA_BACKGROUND_THRESHOLD=10
+      - REMBG_ALPHA_EROSION_SIZE=10
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 30
     restart: always
     networks:

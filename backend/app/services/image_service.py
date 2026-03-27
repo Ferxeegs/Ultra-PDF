@@ -57,8 +57,18 @@ class ImageService:
             raise ValueError("Empty image bytes")
 
         def _process() -> bytes:
-            preferred_model = os.getenv("REMBG_MODEL_NAME", "u2net")
+            # Lock to IS-Net family for consistent quality.
+            preferred_model = os.getenv("REMBG_MODEL_NAME", "isnet-general-use")
             max_side = int(os.getenv("REMBG_MAX_SIDE", "1600"))
+            alpha_matting = os.getenv("REMBG_ALPHA_MATTING", "1").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+            fg_threshold = int(os.getenv("REMBG_ALPHA_FOREGROUND_THRESHOLD", "240"))
+            bg_threshold = int(os.getenv("REMBG_ALPHA_BACKGROUND_THRESHOLD", "10"))
+            erosion_size = int(os.getenv("REMBG_ALPHA_EROSION_SIZE", "10"))
             image_data = image_bytes
 
             # Resize gambar besar untuk menurunkan beban CPU/RAM saat inferensi.
@@ -75,7 +85,7 @@ class ImageService:
                     image_data = buffer.getvalue()
 
             # Prioritas: model lokal lebih dulu (cepat dan konsisten).
-            model_candidates = [preferred_model, "u2net", "u2netp"]
+            model_candidates = [preferred_model, "isnet-general-use"]
             model_candidates = list(dict.fromkeys(model_candidates))
 
             selected_model = next(
@@ -94,13 +104,21 @@ class ImageService:
                 except Exception as exc:
                     raise RuntimeError(
                         "No local rembg model found and online model download failed. "
-                        f"Place u2net.onnx or u2netp.onnx in '{_u2net_home()}', "
+                        f"Place isnet-general-use.onnx in '{_u2net_home()}', "
                         "or ensure container DNS/internet works."
                     ) from exc
             else:
                 session = _get_session(selected_model)
 
-            output = remove(image_data, session=session, force_return_bytes=True)
+            output = remove(
+                image_data,
+                session=session,
+                force_return_bytes=True,
+                alpha_matting=alpha_matting,
+                alpha_matting_foreground_threshold=fg_threshold,
+                alpha_matting_background_threshold=bg_threshold,
+                alpha_matting_erosion_size=erosion_size,
+            )
             if isinstance(output, bytes):
                 return output
             if hasattr(output, "read"):
