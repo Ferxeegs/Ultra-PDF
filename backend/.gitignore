@@ -11,3 +11,4 @@ __pycache__
 *.pyzwz
 *.pyzwzw
 NGINX_CONFIG.md
+.u2net/*
