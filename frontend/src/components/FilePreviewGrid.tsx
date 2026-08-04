@@ -144,7 +144,7 @@ function SortableFilePreview({
       `}
     >
       {/* Thumbnail Preview */}
-      <div className="aspect-[3/4] bg-white dark:bg-slate-900 flex items-center justify-center relative min-h-[200px]">
+      <div className="aspect-[3/4] bg-white dark:bg-slate-900 flex items-center justify-center relative min-h-[200px] overflow-hidden">
         {isLoadingThumbnail ? (
           <div className="text-center">
             <div className="w-6 h-6 border-2 border-blue-500 dark:border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-1"></div>
@@ -154,7 +154,7 @@ function SortableFilePreview({
           <img
             src={thumbnailUrl}
             alt={`Preview ${fileObj.file.name}`}
-            className="w-full h-full object-contain"
+            className="max-w-full max-h-full w-auto h-auto object-contain pointer-events-none"
             style={{ transform: `rotate(${rotation}deg)` }}
           />
         ) : hasError ? (
@@ -357,13 +357,8 @@ export default function FilePreviewGrid({
           </div>
         ) : (
           <SortableContext items={fileObjects.map((obj) => obj.id)} strategy={rectSortingStrategy}>
-            <div 
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[500px] overflow-y-auto p-1 pb-4 custom-scrollbar" 
-              style={{ 
-                willChange: 'transform',
-                overscrollBehavior: 'contain',
-                scrollPaddingBlock: '1rem'
-              }}
+            <div
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-1 pb-4"
             >
               {fileObjects.map((obj, index) => (
                 <SortableFilePreview

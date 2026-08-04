@@ -395,9 +395,9 @@ function MergeEditorContent() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#FDFDFF] dark:bg-slate-900">
+    <div className="h-[calc(100dvh-5rem)] flex flex-col overflow-hidden bg-[#FDFDFF] dark:bg-slate-900">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
         <div className="flex items-center gap-4">
           <button
             onClick={handleBack}
@@ -416,12 +416,11 @@ function MergeEditorContent() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main Content — single scroll region for the queue (avoids nested scrollbars on zoom) */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left: Preview Grid - Takes remaining space */}
         <div 
-          className="flex-1 overflow-y-auto p-4 relative" 
-          style={{ overscrollBehavior: 'contain' }}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 relative custom-scrollbar"
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -559,8 +558,8 @@ function MergeEditorContent() {
 
         {/* Right: Sidebar - Fixed Width */}
         {!downloadUrl && (
-        <div className="w-80 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col">
-          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+        <div className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col min-h-0">
+          <div className="p-6 space-y-6 overflow-y-auto overscroll-contain flex-1 min-h-0 custom-scrollbar">
             {/* Info Section */}
             <div className="space-y-4">
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">

@@ -217,7 +217,7 @@ export default function PagePreviewGrid({
       </div>
 
       {/* Page Grid - Compact like RangePreview */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 max-h-[600px] overflow-y-auto p-1">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-1">
         {pagePreviews.map((preview) => {
           const isSelected = selectedPages.has(preview.pageNumber);
           const rangeInfo = showRangeIndicators ? getPageRangeInfo(preview.pageNumber) : null;

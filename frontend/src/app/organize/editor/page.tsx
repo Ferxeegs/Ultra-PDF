@@ -809,9 +809,9 @@ function OrganizeEditorContent() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#FDFDFF] dark:bg-slate-900">
+    <div className="h-[calc(100dvh-5rem)] flex flex-col overflow-hidden bg-[#FDFDFF] dark:bg-slate-900">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
         <div className="flex items-center gap-4">
           <button
             onClick={handleBack}
@@ -830,11 +830,11 @@ function OrganizeEditorContent() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main Content — single scroll region (avoids nested scrollbars on zoom) */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left: Page Preview Grid */}
         <div 
-          className="flex-1 overflow-y-auto p-4 relative"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 relative custom-scrollbar"
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -915,7 +915,7 @@ function OrganizeEditorContent() {
                       onDragEnd={handlePageDragEnd}
                     >
                       <SortableContext items={pages.map((p) => p.id)} strategy={rectSortingStrategy}>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[600px] overflow-y-auto p-1 custom-scrollbar" style={{ willChange: 'transform' }}>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-1">
                           {pages.map((page, index) => {
                             const isDeleted = deletedPages.has(page.id);
                             return (
@@ -996,8 +996,8 @@ function OrganizeEditorContent() {
 
         {/* Right: Sidebar */}
         {!downloadUrl && (
-        <div className="w-80 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col">
-          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+        <div className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col min-h-0">
+          <div className="p-6 space-y-6 overflow-y-auto overscroll-contain flex-1 min-h-0 custom-scrollbar">
             {/* Info Section */}
             <div className="space-y-4">
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
@@ -1054,7 +1054,7 @@ function OrganizeEditorContent() {
                   {fileObjects.length}
                 </span>
               </div>
-              <div className="max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="pr-1">
                 {fileObjects.length === 0 ? (
                   <div className="text-center py-8 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
                     <p className="text-slate-400 dark:text-slate-500 text-sm">Belum ada file</p>

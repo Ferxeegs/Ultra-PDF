@@ -51,7 +51,7 @@ export default function FileList({
       </div>
 
       <DndContext collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+        <div className="space-y-3 pr-1">
           {fileObjects.length === 0 ? (
             <div className="text-center py-16 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl">
               <p className="text-slate-400 dark:text-slate-500 text-sm">Belum ada file diunggah</p>

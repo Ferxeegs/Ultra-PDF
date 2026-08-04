@@ -257,10 +257,10 @@ export default function ImagePdfEditor() {
     }
 
     return (
-        <main className="min-h-screen bg-[#FDFDFF] dark:bg-slate-900 relative transition-colors duration-200">
-            <div className="flex flex-col h-screen">
+        <main className="h-[calc(100dvh-5rem)] overflow-hidden bg-[#FDFDFF] dark:bg-slate-900 relative transition-colors duration-200">
+            <div className="flex flex-col h-full min-h-0">
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shrink-0">
                     <div className="flex items-center gap-4">
                         <Link 
                             href="/image-to-pdf" 
@@ -290,8 +290,8 @@ export default function ImagePdfEditor() {
                 </div>
 
                 {/* Main Content */}
-                <div className="flex-1 flex overflow-hidden">
-                    <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                <div className="flex-1 flex min-h-0 overflow-hidden">
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 custom-scrollbar">
 
                         {isProcessing && (
                             <div className="mb-6 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
@@ -365,8 +365,8 @@ export default function ImagePdfEditor() {
 
                     {/* Sidebar Settings */}
                     {!downloadUrl && (
-                        <aside className="hidden lg:flex w-80 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex-col">
-                            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                        <aside className="hidden lg:flex w-80 shrink-0 border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex-col min-h-0">
+                            <div className="p-6 space-y-6 overflow-y-auto overscroll-contain flex-1 min-h-0 custom-scrollbar">
                                 {/* Info Section */}
                                 <div className="space-y-4">
                                     <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">

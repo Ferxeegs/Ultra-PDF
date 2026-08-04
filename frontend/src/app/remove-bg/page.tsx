@@ -1,19 +1,31 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { AlertCircle, Eraser, Image as ImageIcon, Loader2, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Download, Eraser, Image as ImageIcon, Loader2, ShieldCheck } from "lucide-react";
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
 import ProgressBar from "@/components/ProgressBar";
 import Footer from "@/components/Footer";
+import RemoveBgPreview from "@/components/RemoveBgPreview";
 import { useRemoveBgWorker } from "@/hooks/useRemoveBgWorker";
 
 export default function RemoveBgPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [originalPreviewUrl, setOriginalPreviewUrl] = useState<string | null>(null);
   const fileUploadRef = useRef<FileUploadZoneRef>(null);
 
   const { isProcessing, progress, progressMessage, downloadUrl, error, removeBackground, reset } =
     useRemoveBgWorker();
+
+  useEffect(() => {
+    if (!file) {
+      setOriginalPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setOriginalPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const handleFileChange = (selectedFile: File) => {
     const valid = selectedFile.type.startsWith("image/") || /\.(jpg|jpeg|png|webp)$/i.test(selectedFile.name);
@@ -37,11 +49,11 @@ export default function RemoveBgPage() {
         <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-purple-100/50 dark:bg-purple-900/10 rounded-full blur-[120px]" />
       </div>
 
-      <div className="max-w-3xl mx-auto relative z-10">
+      <div className={`mx-auto relative z-10 transition-all duration-300 ${downloadUrl ? "max-w-5xl" : "max-w-3xl"}`}>
         <header className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 dark:bg-purple-900/30 border border-purple-100 dark:border-purple-800 text-purple-600 dark:text-purple-400 text-xs font-bold uppercase tracking-wider mb-6 shadow-sm">
             <ShieldCheck size={14} />
-            <span>Rembg + BiRefNet</span>
+            <span>Rembg + BRIA RMBG 1.4</span>
           </div>
           <h1 className="text-5xl font-black text-slate-900 dark:text-slate-100 tracking-tight mb-4">
             Remove <span className="text-purple-600 dark:text-purple-400">Background</span>
@@ -116,20 +128,31 @@ export default function RemoveBgPage() {
                     <span className="text-lg">Hapus Background</span>
                   </button>
                 ) : (
-                  <div className="space-y-3">
-                    <a
-                      href={downloadUrl}
-                      download={`${file.name.replace(/\.[^/.]+$/, "")}-transparent.png`}
-                      className="block w-full text-center py-4 bg-purple-600 text-white rounded-2xl font-bold hover:bg-purple-700 transition-colors"
-                    >
-                      Unduh PNG Transparan
-                    </a>
-                    <button
-                      onClick={handleResetAll}
-                      className="block w-full text-center py-3 border border-slate-200 dark:border-slate-600 rounded-xl font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                    >
-                      Proses Gambar Lain
-                    </button>
+                  <div className="space-y-5">
+                    {originalPreviewUrl && (
+                      <RemoveBgPreview
+                        originalUrl={originalPreviewUrl}
+                        resultUrl={downloadUrl}
+                        fileName={file.name}
+                      />
+                    )}
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <a
+                        href={downloadUrl}
+                        download={`${file.name.replace(/\.[^/.]+$/, "")}-transparent.png`}
+                        className="flex-1 inline-flex items-center justify-center gap-2 py-4 bg-purple-600 text-white rounded-2xl font-bold hover:bg-purple-700 transition-colors shadow-lg shadow-purple-600/20"
+                      >
+                        <Download size={20} />
+                        Unduh PNG Transparan
+                      </a>
+                      <button
+                        onClick={handleResetAll}
+                        className="sm:w-auto px-8 py-4 border border-slate-200 dark:border-slate-600 rounded-2xl font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                      >
+                        Gambar Lain
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

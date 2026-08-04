@@ -5,7 +5,7 @@ Backend untuk aplikasi UltraPDF, menyediakan layanan kompresi dan konversi PDF y
 ## 🚀 Fitur Utama
 
 - **Konversi Dokumen**: Mengubah gambar (JPG, PNG) dan dokumen Office ke PDF.
-- **Remove Background Gambar**: Menghapus background gambar menjadi PNG transparan menggunakan `rembg` (IS-Net + Alpha Matting).
+- **Remove Background Gambar**: Menghapus background gambar menjadi PNG transparan menggunakan `rembg` + **BRIA RMBG 1.4** (soft alpha + refine mask + decontamination).
 - **Kompresi PDF**: Optimasi ukuran file PDF dengan berbagai tingkat kompresi.
 - **Keamanan**: Dilengkapi dengan Security Headers, Rate Limiting, dan validasi input yang ketat.
 - **Kinerja Tinggi**: Menggunakan `uv` untuk manajemen dependensi yang cepat dan efisien.
@@ -89,17 +89,16 @@ PDF hasil LibreOffice di-refine menggunakan Ghostscript dengan setting `/prepres
    ALLOWED_ORIGINS=http://localhost:3000
    UPLOAD_DIR=uploads
    OUTPUT_DIR=outputs
-   # Gunakan model yang sudah tersedia lokal di folder .u2net
-   REMBG_MODEL_NAME=isnet-general-use
-   # Batas sisi terpanjang input sebelum inferensi (otomatis di-resize)
-   REMBG_MAX_SIDE=1600
+   # Model BRIA RMBG 1.4 (ONNX dari HuggingFace briaai/RMBG-1.4)
+   REMBG_MODEL_NAME=bria-rmbg-1.4
+   # Batas sisi terpanjang input sebelum inferensi (2560 = detail rambut/teks kecil)
+   REMBG_MAX_SIDE=2560
    # Default: CPU (aman). Untuk GPU CUDA, pasang onnxruntime-gpu lalu set:
    REMBG_USE_CUDA=0
-   # Alpha Matting untuk hasil tepi/rambut lebih halus (foto manusia)
-   REMBG_ALPHA_MATTING=1
-   REMBG_ALPHA_FOREGROUND_THRESHOLD=240
-   REMBG_ALPHA_BACKGROUND_THRESHOLD=10
-   REMBG_ALPHA_EROSION_SIZE=10
+   # Soft alpha langsung dari mask BRIA (tanpa pymatting — hindari error Cholesky)
+   REMBG_MASK_REFINE=1
+   REMBG_DECONTAMINATE=1
+   REMBG_HALO_SUPPRESS=1
    ```
 
 ### Remove background: `net::ERR_EMPTY_RESPONSE` di browser
@@ -116,10 +115,10 @@ Artinya **koneksi ke backend terputus tanpa respons HTTP** — biasanya proses P
 
 Jika container tidak punya akses DNS/Internet, rembg tidak bisa auto-download model. Pastikan file model sudah ada secara lokal di `backend/.u2net/` dan dipasang sebagai volume ke `/app/.u2net`.
 
-Minimal salah satu file berikut harus ada:
-- `isnet-general-use.onnx` (disarankan untuk foto manusia)
-- `u2net.onnx`
-- `u2netp.onnx`
+File model yang diperlukan:
+- `bria-rmbg-1.4.onnx` (otomatis diunduh saat `docker build`, atau manual dari [briaai/RMBG-1.4/onnx/model.onnx](https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx))
+
+Letakkan di `backend/.u2net/bria-rmbg-1.4.onnx`.
 
 Jika tetap gagal resolve domain dari dalam container, tambahkan DNS resolver publik di `docker-compose.yml` (contoh: `1.1.1.1`, `8.8.8.8`) lalu rebuild/restart service.
 

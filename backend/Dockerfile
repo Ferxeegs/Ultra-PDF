@@ -49,6 +49,14 @@ RUN uv sync --no-install-project --no-dev
 # 6. Copy seluruh isi proyek ke dalam kontainer (termasuk folder fonts jika ada)
 COPY . .
 
+# Pre-download BRIA RMBG 1.4 ONNX (~176MB) agar inferensi offline di container
+RUN mkdir -p /app/.u2net && uv run python -c "\
+import pooch; \
+pooch.retrieve( \
+  'https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx', \
+  'sha256:8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f', \
+  fname='bria-rmbg-1.4.onnx', path='/app/.u2net', progressbar=True)"
+
 # 7. Install Microsoft Fonts (Calibri, Arial, Times New Roman, Segoe UI, dll)
 # Prioritas: Jika folder ./fonts ada (berisi font dari C:\Windows\Fonts), gunakan itu
 # Fallback: Coba install ttf-mscorefonts-installer
