@@ -30,6 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
     libreoffice \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz0b \
+    libcairo2 \
+    libffi8 \
     fonts-liberation \
     fonts-noto \
     fonts-noto-cjk \

@@ -15,6 +15,14 @@ import {
   FileCode,
   Image as ImageIcon,
   Eraser,
+  Repeat,
+  Images,
+  FileImage,
+  ImagePlus,
+  FileType,
+  Sheet,
+  Unlock,
+  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -33,9 +41,17 @@ export default function Navbar() {
   }, []);
 
   const navItems = [
+    { name: "Convert", href: "/convert", icon: Repeat },
+    { name: "Konversi Gambar", href: "/image-converter", icon: Images },
     { name: "Merge", href: "/merge", icon: FileText },
     { name: "Split", href: "/split", icon: Scissors },
     { name: "Word to PDF", href: "/docx-to-pdf", icon: FileCode },
+    { name: "PDF to Word", href: "/pdf-to-word", icon: FileType },
+    { name: "PDF to Excel", href: "/pdf-to-excel", icon: Sheet },
+    { name: "PDF to JPG", href: "/pdf-to-jpg", icon: FileImage },
+    { name: "JPG to PDF", href: "/jpg-to-pdf", icon: ImagePlus },
+    { name: "Unlock PDF", href: "/unlock-pdf", icon: Unlock },
+    { name: "Protect PDF", href: "/protect-pdf", icon: ShieldCheck },
     { name: "Image to PDF", href: "/image-to-pdf", icon: ImageIcon },
     { name: "Remove BG", href: "/remove-bg", icon: Eraser },
     { name: "Organize", href: "/organize", icon: Grid3x3 },

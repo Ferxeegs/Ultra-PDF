@@ -8,6 +8,14 @@ export function useRemoveBgWorker() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const serverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopServerTicker = useCallback(() => {
+    if (serverTimerRef.current) {
+      clearInterval(serverTimerRef.current);
+      serverTimerRef.current = null;
+    }
+  }, []);
 
   const removeBackground = useCallback(async (file: File) => {
     setIsProcessing(true);
@@ -26,8 +34,26 @@ export function useRemoveBgWorker() {
 
         xhr.upload.addEventListener("progress", (event) => {
           if (!event.lengthComputable) return;
-          const current = Math.round((event.loaded / event.total) * 90);
+
+          // Unggahan mengisi 0-70%; sisanya untuk inferensi model di server
+          const current = Math.round((event.loaded / event.total) * 70);
           setProgress(current);
+          setProgressMessage("Mengupload gambar...");
+        });
+
+        // Gambar sudah terkirim: model butuh waktu tanpa mengirim progres
+        xhr.upload.addEventListener("load", () => {
+          setProgressMessage("Model sedang menghapus background...");
+          stopServerTicker();
+          let current = 70;
+          serverTimerRef.current = setInterval(() => {
+            current = Math.min(97, current + 0.5);
+            setProgress(current);
+            if (current >= 97 && serverTimerRef.current) {
+              clearInterval(serverTimerRef.current);
+              serverTimerRef.current = null;
+            }
+          }, 200);
         });
 
         xhr.addEventListener("load", async () => {
@@ -50,24 +76,32 @@ export function useRemoveBgWorker() {
         });
 
         xhr.addEventListener("error", () => reject(new Error("Gagal terhubung ke backend")));
+        xhr.addEventListener("abort", () => reject(new Error("__cancelled__")));
         xhr.open("POST", API_ENDPOINTS.removeBg);
         xhr.responseType = "blob";
         xhr.send(formData);
       });
 
-      setProgressMessage("Menyiapkan hasil...");
+      stopServerTicker();
+      setProgressMessage("Selesai! Hasil siap diunduh.");
       setProgress(100);
       setDownloadUrl(URL.createObjectURL(blob));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Gagal menghapus background gambar");
+      stopServerTicker();
       setProgress(0);
+      setProgressMessage("");
+
+      // Pembatalan oleh user bukan kesalahan yang perlu ditampilkan
+      const message = e instanceof Error ? e.message : "Gagal menghapus background gambar";
+      if (message !== "__cancelled__") setError(message);
     } finally {
       setIsProcessing(false);
       xhrRef.current = null;
     }
-  }, []);
+  }, [stopServerTicker]);
 
   const reset = useCallback(() => {
+    stopServerTicker();
     if (xhrRef.current) {
       xhrRef.current.abort();
       xhrRef.current = null;
@@ -80,7 +114,7 @@ export function useRemoveBgWorker() {
     setProgressMessage("");
     setDownloadUrl(null);
     setError(null);
-  }, [downloadUrl]);
+  }, [downloadUrl, stopServerTicker]);
 
   return {
     isProcessing,

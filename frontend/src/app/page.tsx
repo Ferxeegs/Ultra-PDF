@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   FileText,
   Scissors,
@@ -16,13 +17,122 @@ import {
   ArrowRight,
   Sparkles,
   Infinity,
-  Eraser
+  Eraser,
+  Repeat,
+  Images,
+  FileImage,
+  ImagePlus,
+  FileType,
+  Sheet,
+  Unlock,
+  type LucideIcon
 } from "lucide-react";
 import Footer from "@/components/Footer";
+import { isFeatureNew } from "@/utils/featureBadge";
+
+type Tool = {
+  name: string;
+  desc: string;
+  href: string;
+  icon: LucideIcon;
+  color: string;
+  bg: string;
+  hoverBg: string;
+  /** Tanggal rilis fitur ("YYYY-MM-DD"); badge "New" hilang otomatis setelah 3 hari. */
+  releasedAt?: string;
+};
 
 export default function Home() {
+  // Waktu acuan badge "New", diisi setelah mount agar tidak memicu
+  // hydration mismatch antara waktu server dan waktu browser.
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+  }, []);
+
   // Daftar semua fitur UltraPDF
-  const tools = [
+  const tools: Tool[] = [
+    {
+      name: "Convert Apa Saja",
+      desc: "Word, Excel, PowerPoint, gambar, HTML, Markdown, EPUB ke PDF - dan PDF kembali ke Word, Excel, gambar, atau teks.",
+      href: "/convert",
+      icon: Repeat,
+      color: "text-violet-600 dark:text-violet-400",
+      bg: "bg-violet-50 dark:bg-violet-900/30",
+      hoverBg: "bg-violet-100 dark:bg-violet-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "Konversi Gambar",
+      desc: "Ubah PNG, JPG, WEBP, dan SVG ke format lain lengkap dengan pengaturan ukuran dan kualitas.",
+      href: "/image-converter",
+      icon: Images,
+      color: "text-teal-600 dark:text-teal-400",
+      bg: "bg-teal-50 dark:bg-teal-900/30",
+      hoverBg: "bg-teal-100 dark:bg-teal-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "PDF to JPG",
+      desc: "Ubah tiap halaman PDF menjadi JPG, atau ambil semua gambar yang tertanam di dalamnya.",
+      href: "/pdf-to-jpg",
+      icon: FileImage,
+      color: "text-yellow-600 dark:text-yellow-400",
+      bg: "bg-yellow-50 dark:bg-yellow-900/30",
+      hoverBg: "bg-yellow-100 dark:bg-yellow-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "JPG to PDF",
+      desc: "Ubah gambar JPG menjadi PDF dalam hitungan detik, lengkap dengan pengaturan orientasi dan margin.",
+      href: "/jpg-to-pdf",
+      icon: ImagePlus,
+      color: "text-yellow-600 dark:text-yellow-400",
+      bg: "bg-yellow-50 dark:bg-yellow-900/30",
+      hoverBg: "bg-yellow-100 dark:bg-yellow-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "PDF to Word",
+      desc: "Ubah PDF menjadi dokumen DOC dan DOCX yang mudah diedit dengan tata letak nyaris sama persis.",
+      href: "/pdf-to-word",
+      icon: FileType,
+      color: "text-blue-600 dark:text-blue-400",
+      bg: "bg-blue-50 dark:bg-blue-900/30",
+      hoverBg: "bg-blue-100 dark:bg-blue-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "PDF to Excel",
+      desc: "Tarik data dari PDF langsung ke lembar kerja Excel dalam beberapa detik saja.",
+      href: "/pdf-to-excel",
+      icon: Sheet,
+      color: "text-green-600 dark:text-green-400",
+      bg: "bg-green-50 dark:bg-green-900/30",
+      hoverBg: "bg-green-100 dark:bg-green-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "Unlock PDF",
+      desc: "Hapus proteksi kata sandi PDF, sehingga Anda bebas memakai dokumen sesuai kebutuhan.",
+      href: "/unlock-pdf",
+      icon: Unlock,
+      color: "text-sky-600 dark:text-sky-400",
+      bg: "bg-sky-50 dark:bg-sky-900/30",
+      hoverBg: "bg-sky-100 dark:bg-sky-900/50",
+      releasedAt: "2026-09-07",
+    },
+    {
+      name: "Protect PDF",
+      desc: "Lindungi PDF dengan kata sandi. Enkripsi dokumen untuk mencegah akses tanpa izin.",
+      href: "/protect-pdf",
+      icon: ShieldCheck,
+      color: "text-indigo-600 dark:text-indigo-400",
+      bg: "bg-indigo-50 dark:bg-indigo-900/30",
+      hoverBg: "bg-indigo-100 dark:bg-indigo-900/50",
+      releasedAt: "2026-09-07",
+    },
     {
       name: "Merge PDF",
       desc: "Gabungkan beberapa file PDF menjadi satu dokumen dengan urutan sesuai keinginan.",
@@ -40,7 +150,7 @@ export default function Home() {
       color: "text-indigo-600 dark:text-indigo-400",
       bg: "bg-indigo-50 dark:bg-indigo-900/30",
       hoverBg: "bg-indigo-100 dark:bg-indigo-900/50",
-      isNew: true,
+      releasedAt: "2026-09-07",
     },
     {
       name: "PowerPoint to PDF",
@@ -50,7 +160,7 @@ export default function Home() {
       color: "text-orange-600 dark:text-orange-400",
       bg: "bg-orange-50 dark:bg-orange-900/30",
       hoverBg: "bg-orange-100 dark:bg-orange-900/50",
-      isNew: true,
+      releasedAt: "2026-09-07",
     },
     {
       name: "Image to PDF",
@@ -60,7 +170,7 @@ export default function Home() {
       color: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-50 dark:bg-emerald-900/30",
       hoverBg: "bg-emerald-100 dark:bg-emerald-900/50",
-      isNew: true,
+      releasedAt: "2026-09-07",
     },
     {
       name: "Remove Background",
@@ -70,7 +180,7 @@ export default function Home() {
       color: "text-fuchsia-600 dark:text-fuchsia-400",
       bg: "bg-fuchsia-50 dark:bg-fuchsia-900/30",
       hoverBg: "bg-fuchsia-100 dark:bg-fuchsia-900/50",
-      isNew: true,
+      releasedAt: "2026-09-07",
     },
     {
       name: "Split PDF",
@@ -180,7 +290,7 @@ export default function Home() {
                     <h3 className="text-base sm:text-lg md:text-xl font-black text-slate-900 dark:text-slate-100 tracking-tight leading-tight flex-1">
                       {tool.name}
                     </h3>
-                    {tool.isNew && (
+                    {now !== null && isFeatureNew(tool.releasedAt, now) && (
                       <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-[9px] sm:text-[10px] font-black text-white uppercase tracking-tighter shadow-sm flex-shrink-0">
                         New
                       </span>

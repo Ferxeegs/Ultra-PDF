@@ -13,6 +13,28 @@ export function useConvertWorker() {
     const [error, setError] = useState<string | null>(null);
 
     const xhrRef = useRef<XMLHttpRequest | null>(null);
+    const serverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const stopServerTicker = useCallback(() => {
+        if (serverTimerRef.current) {
+            clearInterval(serverTimerRef.current);
+            serverTimerRef.current = null;
+        }
+    }, []);
+
+    /**
+     * Setelah unggahan selesai, server masih bekerja tanpa mengirim progres.
+     * Bar digerakkan pelan dari 90% ke 99% supaya user tahu proses belum macet.
+     */
+    const startServerTicker = useCallback(() => {
+        stopServerTicker();
+        let current = 90;
+        serverTimerRef.current = setInterval(() => {
+            current = Math.min(99, current + 0.3);
+            setProgress(current);
+            if (current >= 99) stopServerTicker();
+        }, 200);
+    }, [stopServerTicker]);
 
     const convertFile = useCallback(async (
         files: File | File[],
@@ -52,20 +74,25 @@ export function useConvertWorker() {
                 setProgressMessage(`Mengupload ${files.length} gambar...`);
             }
 
-            // DEBUG: Cek isi FormData di console
-            for (let pair of formData.entries()) {
-                console.log("Kirim ke API:", pair[0], pair[1]);
-            }
-
             const response = await new Promise<Blob>((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhrRef.current = xhr;
 
                 xhr.upload.addEventListener("progress", (event) => {
-                    if (event.lengthComputable) {
-                        const uploadProgress = Math.round((event.loaded / event.total) * 95);
-                        setProgress(uploadProgress);
-                    }
+                    if (!event.lengthComputable) return;
+
+                    // Unggahan mengisi 0-90%; sisanya untuk pemrosesan di server
+                    const uploadProgress = Math.round((event.loaded / event.total) * 90);
+                    setProgress(uploadProgress);
+                    setProgressMessage(
+                        uploadProgress >= 90 ? "Unggahan selesai, menunggu server..." : "Mengupload file ke server..."
+                    );
+                });
+
+                // Seluruh berkas sudah terkirim: masuk fase pemrosesan server
+                xhr.upload.addEventListener("load", () => {
+                    setProgressMessage("Server sedang memproses file...");
+                    startServerTicker();
                 });
 
                 xhr.addEventListener("load", () => {
@@ -77,29 +104,46 @@ export function useConvertWorker() {
                 });
 
                 xhr.addEventListener("error", () => reject(new Error("Gagal terhubung ke server backend.")));
+                xhr.addEventListener("abort", () => reject(new Error("__cancelled__")));
                 xhr.open("POST", endpoint);
                 xhr.responseType = "blob";
                 xhr.send(formData);
             });
 
+            stopServerTicker();
             setProgress(100);
+            setProgressMessage("Konversi selesai! File siap diunduh.");
             setDownloadUrl(URL.createObjectURL(response));
             setIsProcessing(false);
 
         } catch (err) {
-            console.error(err);
-            setError(err instanceof Error ? err.message : "Terjadi kesalahan.");
+            stopServerTicker();
+            setProgress(0);
+            setProgressMessage("");
             setIsProcessing(false);
+
+            // Pembatalan oleh user bukan kesalahan yang perlu ditampilkan
+            const message = err instanceof Error ? err.message : "Terjadi kesalahan.";
+            if (message !== "__cancelled__") {
+                console.error(err);
+                setError(message);
+            }
         }
-    }, []);
+    }, [startServerTicker, stopServerTicker]);
 
     const reset = useCallback(() => {
+        stopServerTicker();
+        if (xhrRef.current) {
+            xhrRef.current.abort();
+            xhrRef.current = null;
+        }
         if (downloadUrl) URL.revokeObjectURL(downloadUrl);
         setDownloadUrl(null);
         setProgress(0);
+        setProgressMessage("");
         setIsProcessing(false);
         setError(null);
-    }, [downloadUrl]);
+    }, [downloadUrl, stopServerTicker]);
 
     return { isProcessing, progress, progressMessage, downloadUrl, error, convertFile, reset };
 }

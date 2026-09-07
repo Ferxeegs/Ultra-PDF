@@ -10,7 +10,8 @@ import SignaturePad from "@/components/SignatureCanvas";
 import SignaturePreview from "@/components/SignaturePreview";
 import TextToolbar, { TextPosition } from "@/components/TextToolbar";
 import { indexedDBManager } from "@/utils/indexedDB";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, degrees } from "pdf-lib";
+import { getPageLayout, viewRectToDrawRect, rescaleToLayout } from "@/utils/pdfCoords";
 
 interface SignaturePosition {
   id: string;
@@ -23,6 +24,40 @@ interface SignaturePosition {
   pdfPageWidth: number; // PDF points
   pdfPageHeight: number; // PDF points
   rotation?: number; // Rotation angle in degrees (default: 0)
+}
+
+/** Rasio default kanvas tanda tangan, dipakai bila gambar belum termuat. */
+const DEFAULT_SIGNATURE_ASPECT_RATIO = 800 / 300;
+
+/** Lebar tanda tangan baru relatif terhadap lebar halaman. */
+const SIGNATURE_WIDTH_RATIO = 0.15;
+
+/**
+ * Satu-satunya sumber kebenaran untuk ukuran & posisi tanda tangan baru.
+ * Dipakai oleh preview drag maupun handler drop supaya keduanya tidak
+ * mungkin berbeda hasil.
+ */
+function computeSignaturePlacement(
+  point: { x: number; y: number },
+  pageSize: { width: number; height: number },
+  aspectRatio: number | null
+): { x: number; y: number; width: number; height: number } {
+  const width = pageSize.width * SIGNATURE_WIDTH_RATIO;
+  const height = width / (aspectRatio || DEFAULT_SIGNATURE_ASPECT_RATIO);
+
+  return {
+    x: Math.max(0, Math.min(pageSize.width - width, point.x)),
+    y: Math.max(0, Math.min(pageSize.height - height, point.y)),
+    width,
+    height,
+  };
+}
+
+/** Id unik yang tidak bisa bentrok walau dua drop terjadi di milidetik yang sama. */
+let elementIdCounter = 0;
+function createElementId(fileId: string, pageNumber: number): string {
+  elementIdCounter += 1;
+  return `${fileId}-${pageNumber}-${Date.now()}-${elementIdCounter}`;
 }
 
 // PDF Page Preview Component - Renders actual PDF page
@@ -54,7 +89,7 @@ function PagePreviewItem({
   positions: SignaturePosition[];
   textPositions: TextPosition[];
   sessionSignature: string | null;
-  onDrop: (e: React.DragEvent, pdfOriginalSize: { width: number; height: number }, scaleFactor: number) => void;
+  onDrop: (pdfPageSize: { width: number; height: number }, point: { x: number; y: number }) => void;
   onSignatureMove: (id: string, x: number, y: number) => void;
   onSignatureResize: (id: string, width: number, height: number) => void;
   onSignatureRemove: (id: string) => void;
@@ -64,132 +99,165 @@ function PagePreviewItem({
   onTextRemove: (id: string) => void;
   onTextClick: (id: string, position: { x: number; y: number }) => void;
   onTextRotate: (id: string, rotation: number) => void;
-  onDragOver?: (e: React.DragEvent, pdfOriginalSize: { width: number; height: number }, scaleFactor: number) => void;
+  onDragOver?: (pdfPageSize: { width: number; height: number }, point: { x: number; y: number }) => void;
   signatureAspectRatio: number | null;
 }) {
   const [draggingSignaturePos, setDraggingSignaturePos] = useState<{ x: number; y: number } | null>(null);
   const [pdfPage, setPdfPage] = useState<any>(null);
-  const [pageSize, setPageSize] = useState({ width: 0, height: 0 }); // Browser viewport size (pixels)
-  const [pdfOriginalSize, setPdfOriginalSize] = useState({ width: 0, height: 0 }); // PDF original size (points)
-  const [scaleFactor, setScaleFactor] = useState(1); // Scale between PDF and browser view
+  // Ukuran halaman PDF apa adanya (points, sudah memperhitungkan rotasi & CropBox)
+  const [pdfOriginalSize, setPdfOriginalSize] = useState({ width: 0, height: 0 });
+  // Jumlah pixel CSS per 1 PDF point pada tampilan saat ini
+  const [scaleFactor, setScaleFactor] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const interactionLayerRef = useRef<HTMLDivElement>(null);
   const hasPageSignature = positions.length > 0;
-  // const [isResizing, setIsResizing] = useState(false);
-  // const [resizingSignatureId, setResizingSignatureId] = useState<string | null>(null);
-  // const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
-  // Load and render PDF page
+  // Ukuran tampilan halaman dalam pixel CSS. Selalu turunan langsung dari
+  // scaleFactor supaya overlay dan canvas tidak pernah lepas sinkron.
+  const pageSize = {
+    width: pdfOriginalSize.width * scaleFactor,
+    height: pdfOriginalSize.height * scaleFactor,
+  };
+
+  // 1. Muat halaman PDF (hanya bergantung pada file & nomor halaman)
   useEffect(() => {
     let isMounted = true;
-    let renderTask: any = null;
 
     const loadPdfPage = async () => {
       if (!pdfFile) return;
 
+      let url: string | null = null;
       try {
         const pdfjsLib = await import("pdfjs-dist");
         const version = pdfjsLib.version || "5.4.530";
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
 
-        const url = URL.createObjectURL(pdfFile);
+        url = URL.createObjectURL(pdfFile);
         const loadingTask = pdfjsLib.getDocument({ url, verbosity: 0 });
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(pageNum);
-        
-        if (!isMounted) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        
-        setPdfPage(page);
 
-        // Wait a bit for container to be ready, then calculate scale
-        // Use requestAnimationFrame to ensure DOM is ready
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        if (!isMounted || !containerRef.current) {
-          URL.revokeObjectURL(url);
-          return;
-        }
+        if (!isMounted) return;
 
-        // Get original PDF page dimensions in Points (PDF coordinate system)
+        // Viewport scale 1 = ukuran halaman dalam points, sudah dirotasi.
         const viewport = page.getViewport({ scale: 1 });
-        const pdfWidth = viewport.width; // Original PDF width in points
-        const pdfHeight = viewport.height; // Original PDF height in points
-        setPdfOriginalSize({ width: pdfWidth, height: pdfHeight });
-
-        // Calculate scale to fit container width (with padding)
-        // Use more of the available width for larger preview
-        const containerWidth = Math.max(containerRef.current.clientWidth - 16, 800); // Account for padding (p-2 = 8px each side), min 800px
-        const scale = Math.min(containerWidth / viewport.width, 3.2); // Max 3.2x scale for larger preview
-        const scaledViewport = page.getViewport({ scale });
-        
-        // Store browser viewport size (pixels)
-        setPageSize({ width: scaledViewport.width, height: scaledViewport.height });
-        
-        // Calculate scale factor: PDF points to browser pixels
-        // This is the ratio: browserPixel / pdfPoint
-        const calculatedScaleFactor = scaledViewport.width / pdfWidth;
-        setScaleFactor(calculatedScaleFactor);
-
-        // Render to canvas
-        if (canvasRef.current && isMounted) {
-          const canvas = canvasRef.current;
-          const context = canvas.getContext("2d");
-          if (!context) {
-            URL.revokeObjectURL(url);
-            return;
-          }
-
-          // Cancel previous render if exists
-          if (renderTask) {
-            renderTask.cancel();
-          }
-
-          canvas.height = scaledViewport.height;
-          canvas.width = scaledViewport.width;
-
-          // Clear canvas
-          context.clearRect(0, 0, canvas.width, canvas.height);
-
-          // Create render task
-          renderTask = page.render({
-            canvasContext: context,
-            viewport: scaledViewport,
-          } as any);
-
-          await renderTask.promise;
-          renderTask = null;
-        }
-
-        URL.revokeObjectURL(url);
+        setPdfOriginalSize({ width: viewport.width, height: viewport.height });
+        setPdfPage(page);
       } catch (error) {
-        if (error && typeof error === 'object' && 'name' in error && error.name === 'RenderingCancelledException') {
-          // Ignore cancellation errors
-          return;
-        }
         console.error(`Error loading PDF page ${pageNum}:`, error);
+      } finally {
+        if (url) URL.revokeObjectURL(url);
       }
     };
 
     loadPdfPage();
 
-    // Cleanup function
     return () => {
       isMounted = false;
-      if (renderTask) {
-        renderTask.cancel();
-      }
     };
   }, [pdfFile, pageNum]);
+
+  // 2. Ukur lebar container secara live. Inilah yang dulu hilang: scaleFactor
+  //    dihitung sekali saat load, jadi setiap perubahan layout (resize window,
+  //    sidebar dibuka/tutup, scrollbar muncul) membuat overlay tidak lagi
+  //    sejajar dengan canvas -> tanda tangan terlihat "bergeser sendiri".
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || pdfOriginalSize.width === 0) return;
+
+    const measure = () => {
+      const available = container.clientWidth - 16; // padding p-2 kiri+kanan
+      if (available <= 0) return;
+      const next = Math.min(available / pdfOriginalSize.width, 3.2);
+      setScaleFactor((prev) => (Math.abs(prev - next) < 0.0005 ? prev : next));
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [pdfOriginalSize.width]);
+
+  // 3. Render ke canvas setiap kali halaman atau skala tampilan berubah.
+  useEffect(() => {
+    if (!pdfPage || scaleFactor <= 0) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let cancelled = false;
+    let renderTask: any = null;
+
+    // Canvas melar mengikuti kotak halaman lewat CSS, jadi rasterisasi ulang
+    // boleh sedikit tertunda saat window di-resize tanpa membuat overlay
+    // dan halaman terlihat tidak sinkron.
+    const isFirstPaint = canvas.width === 0;
+
+    const render = () => {
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      // Backing store mengikuti devicePixelRatio agar tetap tajam, tetapi
+      // ukuran CSS-nya dikunci ke scaleFactor supaya 1 point selalu bernilai
+      // scaleFactor pixel CSS - tidak ada lagi penyusutan diam-diam oleh
+      // `max-width: 100%`.
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const viewport = pdfPage.getViewport({ scale: scaleFactor * dpr });
+
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+
+      renderTask = pdfPage.render({ canvasContext: context, viewport } as any);
+      renderTask.promise
+        .then(() => {
+          renderTask = null;
+        })
+        .catch((error: any) => {
+          if (cancelled) return;
+          if (error?.name === "RenderingCancelledException") return;
+          console.error(`Error rendering PDF page ${pageNum}:`, error);
+        });
+    };
+
+    const timer = isFirstPaint ? null : window.setTimeout(render, 120);
+    if (isFirstPaint) render();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      if (renderTask) renderTask.cancel();
+    };
+  }, [pdfPage, scaleFactor, pageNum]);
+
+  /**
+   * Konversi titik layar -> PDF points. Selalu mengukur canvas pada saat
+   * kejadian, bukan memakai nilai layout yang mungkin sudah basi.
+   */
+  const clientToPdfPoint = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || pdfOriginalSize.width === 0) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
+    const liveScale = rect.width / pdfOriginalSize.width;
+    return {
+      x: (clientX - rect.left) / liveScale,
+      y: (clientY - rect.top) / liveScale,
+    };
+  };
 
   return (
     <div
       ref={containerRef}
-      className="relative group"
+      className="relative group w-full"
       onDragOver={(e) => {
         // Hanya handle signature drag, bukan file drag
         const isSignatureDrag = e.dataTransfer.types.includes("text/plain") && 
@@ -203,39 +271,14 @@ function PagePreviewItem({
         e.preventDefault();
         e.stopPropagation();
         if (sessionSignature && pdfOriginalSize.width > 0 && scaleFactor > 0) {
-          // Update posisi signature preview secara real-time
-          if (onDragOver) {
-            onDragOver(e, pdfOriginalSize, scaleFactor);
-          }
           
-          // Calculate position untuk preview - use EXACT same calculation as drop
-          const canvas = canvasRef.current;
-          if (canvas) {
-            const canvasRect = canvas.getBoundingClientRect();
-            
-            // Calculate position relative to canvas (browser pixels) - EXACT same as handleThumbnailDrop
-            const dropXPixels = e.clientX - canvasRect.left;
-            const dropYPixels = e.clientY - canvasRect.top;
-            
-            // Convert browser pixels to PDF points - EXACT same as drop
-            const dropXPoints = dropXPixels / scaleFactor;
-            const dropYPoints = dropYPixels / scaleFactor;
-            
-            // Calculate signature size - EXACT same as handleThumbnailDrop
-            const signatureWidthPoints = pdfOriginalSize.width * 0.15;
-            let signatureHeightPoints: number;
-            if (signatureAspectRatio) {
-              signatureHeightPoints = signatureWidthPoints / signatureAspectRatio;
-            } else {
-              const defaultAspectRatio = 800 / 300;
-              signatureHeightPoints = signatureWidthPoints / defaultAspectRatio;
-            }
-            
-            // Clamp position - EXACT same logic as handleThumbnailDrop
-            const clampedX = Math.max(0, Math.min(pdfOriginalSize.width - signatureWidthPoints, dropXPoints));
-            const clampedY = Math.max(0, Math.min(pdfOriginalSize.height - signatureHeightPoints, dropYPoints));
-            
-            setDraggingSignaturePos({ x: clampedX, y: clampedY });
+          // Preview memakai fungsi penempatan yang sama persis dengan drop,
+          // jadi apa yang terlihat saat drag adalah apa yang tersimpan.
+          const point = clientToPdfPoint(e.clientX, e.clientY);
+          if (point) {
+            onDragOver?.(pdfOriginalSize, point);
+            const placement = computeSignaturePlacement(point, pdfOriginalSize, signatureAspectRatio);
+            setDraggingSignaturePos({ x: placement.x, y: placement.y });
           }
         }
       }}
@@ -269,7 +312,10 @@ function PagePreviewItem({
         setDraggingSignaturePos(null);
         if (sessionSignature && pdfOriginalSize.width > 0 && scaleFactor > 0) {
           // Pass the exact same values that were used in preview
-          onDrop(e, pdfOriginalSize, scaleFactor);
+          const point = clientToPdfPoint(e.clientX, e.clientY);
+          if (point) {
+            onDrop(pdfOriginalSize, point);
+          }
         }
       }}
     >
@@ -283,70 +329,38 @@ function PagePreviewItem({
           </div>
         ) : (
           <>
-            {/* LAYER 1: Bottom Layer - PDF Canvas (PDF Viewer) */}
+            {/* LAYER 1: Kotak halaman - ukurannya persis pageSize, sehingga
+                semua overlay bisa memakai koordinat relatif terhadap kotak ini
+                tanpa perlu mengukur offset canvas lewat getBoundingClientRect
+                (pengukuran itu basi setiap kali layout berubah). */}
             <div className="flex justify-center p-2 bg-slate-50 dark:bg-slate-900 relative">
-              <canvas
-                ref={canvasRef}
-                className="shadow-lg relative z-0"
-                style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
-              />
-              
-              {/* LAYER 2: Middle Layer - Interaction Canvas (Transparent for drop detection) */}
-              {canvasRef.current && pageSize.width > 0 && (
-                <div
-                  ref={interactionLayerRef}
-                  className="absolute z-10"
-                  style={{
-                    left: '50%',
-                    top: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    width: `${pageSize.width}px`,
-                    height: `${pageSize.height}px`,
-                    pointerEvents: 'auto',
-                  }}
+              <div
+                className="relative shadow-lg bg-white"
+                style={{ width: `${pageSize.width}px`, height: `${pageSize.height}px` }}
+              >
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0 z-0"
+                  style={{ display: 'block', width: '100%', height: '100%' }}
                 />
-              )}
-              
-              {/* LAYER 3: Top Layer - Draggable Signatures */}
-              {/* Preview signature saat drag */}
-              {sessionSignature && draggingSignaturePos && canvasRef.current && pageSize.width > 0 && scaleFactor > 0 && (
+
+              {/* LAYER 2: Preview signature saat drag */}
+              {sessionSignature && draggingSignaturePos && pageSize.width > 0 && scaleFactor > 0 && (
                 (() => {
-                  const containerRect = containerRef.current?.getBoundingClientRect();
-                  const canvasRect = canvasRef.current?.getBoundingClientRect();
-                  if (!containerRect || !canvasRect) return null;
-                  
-                  const canvasOffsetX = canvasRect.left - containerRect.left;
-                  const canvasOffsetY = canvasRect.top - containerRect.top;
-                  
-                  // Calculate signature size - use EXACT same logic as handleThumbnailDrop
-                  const signatureWidthPoints = pdfOriginalSize.width * 0.15;
-                  
-                  // Get aspect ratio - EXACT same logic as handleThumbnailDrop
-                  let signatureHeightPoints: number;
-                  if (signatureAspectRatio) {
-                    signatureHeightPoints = signatureWidthPoints / signatureAspectRatio;
-                  } else {
-                    const defaultAspectRatio = 800 / 300;
-                    signatureHeightPoints = signatureWidthPoints / defaultAspectRatio;
-                  }
-                  
-                  // Convert to browser pixels - EXACT same as how drop calculates
-                  const browserWidth = signatureWidthPoints * scaleFactor;
-                  const browserHeight = signatureHeightPoints * scaleFactor;
-                  
-                  // Convert PDF points to browser pixels for position
-                  // Position is top-left corner, same as drop
-                  const browserX = draggingSignaturePos.x * scaleFactor;
-                  const browserY = draggingSignaturePos.y * scaleFactor;
-                  
+                  const placement = computeSignaturePlacement(
+                    draggingSignaturePos,
+                    pdfOriginalSize,
+                    signatureAspectRatio
+                  );
+
                   return (
                     <div
                       className="absolute pointer-events-none z-30 opacity-70"
                       style={{
-                        left: `${canvasOffsetX + browserX}px`,
-                        top: `${canvasOffsetY + browserY}px`,
-                        width: `${browserWidth}px`,
-                        height: `${browserHeight}px`,
+                        left: `${placement.x * scaleFactor}px`,
+                        top: `${placement.y * scaleFactor}px`,
+                        width: `${placement.width * scaleFactor}px`,
+                        height: `${placement.height * scaleFactor}px`,
                       }}
                     >
                       <img
@@ -360,30 +374,21 @@ function PagePreviewItem({
                 })()
               )}
               
-              {canvasRef.current && pageSize.width > 0 && scaleFactor > 0 && positions.map((pos: SignaturePosition) => {
-                // Convert PDF points to browser pixels
-                // PDF coordinates are in points, browser needs pixels
+              {pageSize.width > 0 && scaleFactor > 0 && positions.map((pos: SignaturePosition) => {
+                // PDF points -> pixel CSS. Koordinat sudah relatif terhadap
+                // kotak halaman, jadi tidak ada offset yang perlu diukur.
                 const browserX = (pos.x * scaleFactor);
                 const browserY = (pos.y * scaleFactor);
                 const browserWidth = (pos.width * scaleFactor);
                 const browserHeight = (pos.height * scaleFactor);
-
-                // Calculate position relative to container
-                const containerRect = containerRef.current?.getBoundingClientRect();
-                const canvasRect = canvasRef.current?.getBoundingClientRect();
-                if (!containerRect || !canvasRect) return null;
-
-                // Calculate offset: canvas is centered with padding
-                const canvasOffsetX = canvasRect.left - containerRect.left;
-                const canvasOffsetY = canvasRect.top - containerRect.top;
 
                 return (
                   <div
                     key={pos.id}
                     className="absolute pointer-events-auto cursor-move group/sig z-20"
                     style={{
-                      left: `${canvasOffsetX + browserX}px`,
-                      top: `${canvasOffsetY + browserY}px`,
+                      left: `${browserX}px`,
+                      top: `${browserY}px`,
                       width: `${browserWidth}px`,
                       height: `${browserHeight}px`,
                       transform: `rotate(${pos.rotation || 0}deg)`,
@@ -527,25 +532,26 @@ function PagePreviewItem({
                                 newWidth = newHeight * aspectRatio;
                               }
                               
-                              // Clamp to min/max sizes
+                              // Semua batas dihitung sebagai batas LEBAR lalu
+                              // tinggi diturunkan dari aspect ratio. Meng-clamp
+                              // lebar dan tinggi secara terpisah (versi lama)
+                              // merusak aspect ratio, dan saat ekspor ukurannya
+                              // "dikoreksi" lagi sehingga tanda tangan tampak
+                              // bergeser dari tempat yang dipilih user.
                               const minWidth = pdfOriginalSize.width * 0.05;
-                              const maxWidth = pdfOriginalSize.width * 0.4;
-                              const minHeight = pdfOriginalSize.height * 0.03;
-                              const maxHeight = pdfOriginalSize.height * 0.2;
-                              
+                              const maxWidthByPage = pdfOriginalSize.width * 0.4;
+                              const maxWidthByHeight = (pdfOriginalSize.height * 0.2) * aspectRatio;
+                              const maxWidthByRightEdge = pdfOriginalSize.width - pos.x;
+                              const maxWidthByBottomEdge = (pdfOriginalSize.height - pos.y) * aspectRatio;
+
+                              const maxWidth = Math.max(
+                                minWidth,
+                                Math.min(maxWidthByPage, maxWidthByHeight, maxWidthByRightEdge, maxWidthByBottomEdge)
+                              );
+
                               newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
-                              newHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
-                              
-                              // Ensure signature doesn't go outside page bounds
-                              if (pos.x + newWidth > pdfOriginalSize.width) {
-                                newWidth = pdfOriginalSize.width - pos.x;
-                                newHeight = newWidth / aspectRatio;
-                              }
-                              if (pos.y + newHeight > pdfOriginalSize.height) {
-                                newHeight = pdfOriginalSize.height - pos.y;
-                                newWidth = newHeight * aspectRatio;
-                              }
-                              
+                              newHeight = newWidth / aspectRatio;
+
                               onSignatureResize(pos.id, newWidth, newHeight);
                             };
                             
@@ -567,20 +573,11 @@ function PagePreviewItem({
               })}
 
               {/* Render Text Elements */}
-              {canvasRef.current && pageSize.width > 0 && scaleFactor > 0 && textPositions.map((textPos: TextPosition) => {
-                // Convert PDF points to browser pixels
+              {pageSize.width > 0 && scaleFactor > 0 && textPositions.map((textPos: TextPosition) => {
+                // PDF points -> pixel CSS, relatif terhadap kotak halaman.
                 const browserX = textPos.x * scaleFactor;
                 const browserY = textPos.y * scaleFactor;
                 const browserFontSize = textPos.fontSize * scaleFactor;
-
-                // Calculate position relative to container
-                const containerRect = containerRef.current?.getBoundingClientRect();
-                const canvasRect = canvasRef.current?.getBoundingClientRect();
-                if (!containerRect || !canvasRect) return null;
-
-                // Calculate offset: canvas is centered with padding
-                const canvasOffsetX = canvasRect.left - containerRect.left;
-                const canvasOffsetY = canvasRect.top - containerRect.top;
 
                 // Convert HEX to RGB for CSS
                 const hexToRgb = (hex: string) => {
@@ -602,8 +599,8 @@ function PagePreviewItem({
                     key={textPos.id}
                     className="absolute pointer-events-auto cursor-move group/text z-20"
                     style={{
-                      left: `${canvasOffsetX + browserX}px`,
-                      top: `${canvasOffsetY + browserY}px`,
+                      left: `${browserX}px`,
+                      top: `${browserY}px`,
                       transform: `rotate(${textPos.rotation || 0}deg)`,
                       transformOrigin: 'top left',
                     }}
@@ -784,6 +781,7 @@ function PagePreviewItem({
                   </div>
                 );
               })}
+              </div>
             </div>
           </>
         )}
@@ -1225,12 +1223,28 @@ function SignEditorContent() {
   const handleSaveSignature = (dataUrl: string) => {
     setSessionSignature(dataUrl);
     setShowSignatureCanvas(false);
-    
-    // Calculate and store signature aspect ratio
+
     const img = new Image();
     img.onload = () => {
       const aspectRatio = img.width / img.height;
       setSignatureAspectRatio(aspectRatio);
+
+      // Tanda tangan yang diganti bisa punya rasio berbeda. Sesuaikan tinggi
+      // penempatan yang sudah ada supaya gambar tidak gepeng - dan yang lebih
+      // penting, supaya ukurannya tidak "dikoreksi" diam-diam saat ekspor.
+      setSignaturePositions((prev) => {
+        const newMap = new Map<string, SignaturePosition[]>();
+        for (const [key, positions] of prev.entries()) {
+          newMap.set(
+            key,
+            positions.map((pos) => {
+              const height = pos.width / aspectRatio;
+              return Math.abs(height - pos.height) < 0.01 ? pos : { ...pos, height };
+            })
+          );
+        }
+        return newMap;
+      });
     };
     img.src = dataUrl;
   };
@@ -1265,42 +1279,17 @@ function SignEditorContent() {
   const handleSignatureDrop = (x: number, y: number, pdfPageWidth: number, pdfPageHeight: number) => {
     if (!previewFileId || previewPageNumber === null || !sessionSignature) return;
 
-    // Calculate signature size based on aspect ratio
-    // Default: 15% of page width, then calculate height based on signature aspect ratio
-    const signatureWidthPoints = pdfPageWidth * 0.15;
-    
-    // Get aspect ratio (either from state or calculate from image)
-    const calculateAspectRatio = (): number => {
-      if (signatureAspectRatio) {
-        return signatureAspectRatio;
-      }
-      // Fallback: calculate from image synchronously if possible, or use default
-      // Default canvas aspect ratio is 800/300 = 2.67
-      return 800 / 300;
-    };
+    const placement = computeSignaturePlacement(
+      { x, y },
+      { width: pdfPageWidth, height: pdfPageHeight },
+      signatureAspectRatio
+    );
 
-    const aspectRatio = calculateAspectRatio();
-    const signatureHeightPoints = signatureWidthPoints / aspectRatio;
-
-    // If aspect ratio not stored yet, calculate it now
-    if (!signatureAspectRatio && sessionSignature) {
-      const img = new Image();
-      img.onload = () => {
-        const calculatedAspectRatio = img.width / img.height;
-        setSignatureAspectRatio(calculatedAspectRatio);
-      };
-      img.src = sessionSignature;
-    }
-
-    const positionId = `${previewFileId}-${previewPageNumber}-${Date.now()}`;
     const newPosition: SignaturePosition = {
-      id: positionId,
+      id: createElementId(previewFileId, previewPageNumber),
       fileId: previewFileId,
       pageNumber: previewPageNumber,
-      x: Math.max(0, Math.min(pdfPageWidth - signatureWidthPoints, x)),
-      y: Math.max(0, Math.min(pdfPageHeight - signatureHeightPoints, y)),
-      width: signatureWidthPoints,
-      height: signatureHeightPoints,
+      ...placement,
       pdfPageWidth,
       pdfPageHeight,
     };
@@ -1314,76 +1303,28 @@ function SignEditorContent() {
     });
   };
 
-  // Handle drag over untuk preview signature secara real-time
-  const handleDragOver = (
+  /**
+   * Drop tanda tangan ke halaman. `point` sudah dalam PDF points (top-left,
+   * Y ke bawah) dan dihitung oleh PagePreviewItem dari pengukuran canvas
+   * saat kejadian, sehingga tidak terpengaruh perubahan layout.
+   */
+  const handleThumbnailDrop = (
     fileId: string,
     pageNumber: number,
-    event: React.DragEvent,
-    pdfOriginalSize: { width: number; height: number },
-    scaleFactor: number
+    pdfPageSize: { width: number; height: number },
+    point: { x: number; y: number }
   ) => {
-    // Handler ini dipanggil saat drag over untuk update preview
-    // Tidak perlu melakukan apa-apa di sini karena preview sudah di-handle di PagePreviewItem
-  };
+    if (!sessionSignature || pdfPageSize.width === 0) return;
 
-  // Handle direct drop to thumbnail (with PDF coordinate conversion)
-  const handleThumbnailDrop = (
-    fileId: string, 
-    pageNumber: number, 
-    event: React.DragEvent,
-    pdfOriginalSize: { width: number; height: number },
-    scaleFactor: number
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    
-    if (!sessionSignature || pdfOriginalSize.width === 0 || scaleFactor === 0) return;
+    const placement = computeSignaturePlacement(point, pdfPageSize, signatureAspectRatio);
 
-    // Get drop position relative to canvas
-    const container = event.currentTarget.closest('.relative.group') as HTMLElement;
-    const canvas = container?.querySelector('canvas') as HTMLCanvasElement;
-    
-    if (!canvas) return;
-
-    const canvasRect = canvas.getBoundingClientRect();
-    
-    // Calculate position relative to canvas (browser pixels) - EXACT same as preview
-    const dropXPixels = event.clientX - canvasRect.left;
-    const dropYPixels = event.clientY - canvasRect.top;
-    
-    // Convert browser pixels to PDF points - EXACT same as preview
-    const dropXPoints = dropXPixels / scaleFactor;
-    const dropYPoints = dropYPixels / scaleFactor;
-
-    // Calculate signature size based on aspect ratio - EXACT same as preview
-    // Default: 15% of page width, then calculate height based on signature aspect ratio
-    let signatureWidthPoints = pdfOriginalSize.width * 0.15;
-    let signatureHeightPoints: number;
-    
-    if (signatureAspectRatio) {
-      // Use stored aspect ratio - same as preview
-      signatureHeightPoints = signatureWidthPoints / signatureAspectRatio;
-    } else {
-      // Fallback: use same default as preview (800/300 aspect ratio)
-      const defaultAspectRatio = 800 / 300;
-      signatureHeightPoints = signatureWidthPoints / defaultAspectRatio;
-    }
-
-    // Clamp to ensure signature fits within PDF bounds - same logic as preview
-    const clampedX = Math.max(0, Math.min(pdfOriginalSize.width - signatureWidthPoints, dropXPoints));
-    const clampedY = Math.max(0, Math.min(pdfOriginalSize.height - signatureHeightPoints, dropYPoints));
-
-    const positionId = `${fileId}-${pageNumber}-${Date.now()}`;
     const newPosition: SignaturePosition = {
-      id: positionId,
+      id: createElementId(fileId, pageNumber),
       fileId,
       pageNumber,
-      x: clampedX,
-      y: clampedY, // Already from top, no adjustment needed
-      width: signatureWidthPoints,
-      height: signatureHeightPoints,
-      pdfPageWidth: pdfOriginalSize.width,
-      pdfPageHeight: pdfOriginalSize.height,
+      ...placement,
+      pdfPageWidth: pdfPageSize.width,
+      pdfPageHeight: pdfPageSize.height,
     };
 
     const key = `${fileId}-${pageNumber}`;
@@ -1687,51 +1628,8 @@ function SignEditorContent() {
 
         // Load signature image (jika ada)
         let signatureImage: any = null;
-        let signatureAspectRatioLocal: number | null = null;
-
-        // Helper function to rotate image using canvas
-        const rotateImage = async (imageDataUrl: string, rotation: number): Promise<string> => {
-          if (rotation === 0) return imageDataUrl;
-          
-          return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const ctx = canvas.getContext('2d');
-              if (!ctx) {
-                resolve(imageDataUrl);
-                return;
-              }
-              
-              const rotationRad = (rotation * Math.PI) / 180;
-              const cos = Math.abs(Math.cos(rotationRad));
-              const sin = Math.abs(Math.sin(rotationRad));
-              
-              // Calculate new canvas size to fit rotated image
-              const newWidth = img.width * cos + img.height * sin;
-              const newHeight = img.width * sin + img.height * cos;
-              
-              canvas.width = newWidth;
-              canvas.height = newHeight;
-              
-              // Rotate and draw
-              ctx.save();
-              ctx.translate(newWidth / 2, newHeight / 2);
-              ctx.rotate(rotationRad);
-              ctx.drawImage(img, -img.width / 2, -img.height / 2);
-              ctx.restore();
-              
-              resolve(canvas.toDataURL('image/png'));
-            };
-            img.src = imageDataUrl;
-          });
-        };
-
         if (sessionSignature) {
           signatureImage = await pdfDoc.embedPng(sessionSignature);
-          // Get original signature dimensions to calculate aspect ratio
-          signatureAspectRatioLocal =
-            signatureImage.width / signatureImage.height;
         }
 
         // Get all signature positions for this file
@@ -1742,53 +1640,48 @@ function SignEditorContent() {
           }
         }
 
-        // Add signature to each position (jika ada signature)
-        if (signatureImage && signatureAspectRatioLocal) {
+        // Gambar tanda tangan pada tiap posisi (jika ada signature)
+        if (signatureImage) {
           for (const position of allPositions) {
             const page = pdfDoc.getPage(position.pageNumber - 1);
-            const { width: pageWidth, height: pageHeight } = page.getSize();
-            
-            // Rotate signature image if needed
-            let imageToDraw = signatureImage;
-            const rotation = position.rotation || 0;
-            if (rotation !== 0 && sessionSignature) {
-              const rotatedImageDataUrl = await rotateImage(sessionSignature, rotation);
-              imageToDraw = await pdfDoc.embedPng(rotatedImageDataUrl);
-            }
 
-            // Positions are already in PDF points, use them directly
-            // But we need to handle Y-axis: PDF starts from bottom-left, our coordinates are top-left
-            // So: pdfY = pageHeight - position.y - position.height
-            const pdfX = position.x;
-            
-            // Calculate actual width and height maintaining signature aspect ratio
-            // Use the stored width/height as preferred size, but adjust to maintain aspect ratio
-            let finalWidth = position.width;
-            let finalHeight = position.height;
-            
-            // Check if current dimensions match signature aspect ratio
-            const positionAspectRatio = position.width / position.height;
-            
-            if (Math.abs(positionAspectRatio - signatureAspectRatioLocal) > 0.01) {
-              // Aspect ratios don't match, adjust to maintain signature aspect ratio
-              // Use width as primary dimension and calculate height
-              finalHeight = finalWidth / signatureAspectRatioLocal;
-              
-              // If calculated height exceeds position height, use height as primary instead
-              if (finalHeight > position.height) {
-                finalHeight = position.height;
-                finalWidth = finalHeight * signatureAspectRatioLocal;
-              }
-            }
-            
-            const pdfY = pageHeight - position.y - finalHeight;
+            // Layout halaman yang sebenarnya: memperhitungkan /Rotate dan
+            // CropBox, persis seperti viewport pdf.js yang dilihat user.
+            // Tanpa ini, halaman hasil scan (ber-/Rotate) atau halaman dengan
+            // CropBox != MediaBox membuat tanda tangan mendarat di tempat lain.
+            const layout = getPageLayout(page);
 
-            // Draw rotated image (rotation already applied to imageToDraw above)
-            page.drawImage(imageToDraw, {
-              x: pdfX,
-              y: pdfY,
-              width: finalWidth,
-              height: finalHeight,
+            // Kalau ukuran halaman saat penempatan berbeda dengan sekarang,
+            // skalakan supaya posisi relatifnya tetap sama.
+            const rect = rescaleToLayout(
+              position,
+              position.pdfPageWidth,
+              position.pdfPageHeight,
+              layout
+            );
+
+            // WYSIWYG: ukuran yang dipakai adalah ukuran yang user lihat.
+            // Versi lama "mengoreksi" tinggi agar cocok dengan aspect ratio
+            // gambar, dan karena pdfY ikut bergantung pada tinggi itu, tanda
+            // tangan bergeser vertikal dari titik yang sudah dipilih user.
+            const drawRect = viewRectToDrawRect(
+              {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                rotation: position.rotation || 0,
+                origin: "center", // sama dengan transform-origin di editor
+              },
+              layout
+            );
+
+            page.drawImage(signatureImage, {
+              x: drawRect.x,
+              y: drawRect.y,
+              width: drawRect.width,
+              height: drawRect.height,
+              rotate: degrees(drawRect.rotate),
             });
           }
         }
@@ -1810,8 +1703,7 @@ function SignEditorContent() {
           opacity: number,
           dpi: number = 300,
           blur: number = 0,
-          padding: number = 20,
-          rotation: number = 0
+          padding: number = 20
         ): Promise<string> => {
           // Create offscreen canvas for rasterization
           const canvas = document.createElement('canvas');
@@ -1847,16 +1739,8 @@ function SignEditorContent() {
           const minTextHeight = canvasFontSize; // Minimum height based on font size
           const textHeight = Math.max(actualHeight, minTextHeight);
           
-          // Calculate canvas size accounting for rotation
-          // When rotated, we need extra space to fit the rotated text
-          const rotationRad = (rotation * Math.PI) / 180;
-          const cos = Math.abs(Math.cos(rotationRad));
-          const sin = Math.abs(Math.sin(rotationRad));
-          const rotatedWidth = textWidth * cos + textHeight * sin;
-          const rotatedHeight = textWidth * sin + textHeight * cos;
-          
-          canvas.width = Math.ceil(rotatedWidth + (padding * 2));
-          canvas.height = Math.ceil(rotatedHeight + (padding * 2));
+          canvas.width = Math.ceil(textWidth + (padding * 2));
+          canvas.height = Math.ceil(textHeight + (padding * 2));
 
           // Clear canvas with transparent background
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1879,26 +1763,11 @@ function SignEditorContent() {
           ctx.textBaseline = 'top';
           ctx.textAlign = 'left';
 
-          // Apply rotation if needed
-          if (rotation !== 0) {
-            // Calculate center of text area
-            const centerX = canvas.width / 2;
-            const centerY = canvas.height / 2;
-            
-            // Translate to center, rotate, translate back
-            ctx.save();
-            ctx.translate(centerX, centerY);
-            ctx.rotate(rotationRad);
-            ctx.translate(-centerX, -centerY);
-            
-            // Draw text centered
-            ctx.fillText(text, (canvas.width - textWidth) / 2, (canvas.height - textHeight) / 2);
-            
-            ctx.restore();
-          } else {
-            // Draw text with padding offset (top-left corner at padding, padding)
-            ctx.fillText(text, padding, padding);
-          }
+          // Rotasi TIDAK dilakukan di sini. Memutar bitmap membuat kotaknya
+          // membesar, sedangkan pdf-lib menggambarnya ke kotak berukuran asli,
+          // sehingga teks/tanda tangan tergeser dan gepeng. Rotasi diterapkan
+          // saat drawImage dengan pivot yang sama seperti di editor.
+          ctx.fillText(text, padding, padding);
 
           // Reset filter
           ctx.filter = 'none';
@@ -1909,68 +1778,56 @@ function SignEditorContent() {
 
         for (const textPos of allTextPositions) {
           const page = pdfDoc.getPage(textPos.pageNumber - 1);
-          const { width: pageWidth, height: pageHeight } = page.getSize();
-        
+          const layout = getPageLayout(page);
+
           // Use DPI from textPosition, default to 300 for print quality
           const renderDpi = textPos.dpi || 300;
-          const pdfPointsPerInch = 72;
-          const scaleFactor = pdfPointsPerInch / renderDpi; // Convert from canvas pixels to PDF points
-        
-          // 1. Rasterize with known fixed padding
-          const canvasPadding = 20; // Fixed padding for stability across resolutions
+          const pointsPerCanvasPixel = 72 / renderDpi;
+
+          // 1. Rasterize tanpa rotasi, dengan padding tetap
+          const canvasPadding = 20;
           const textImageDataUrl = await rasterizeText(
-            textPos.text, 
-            textPos.fontSize, 
-            textPos.fontFamily, 
-            textPos.color, 
-            textPos.opacity, 
-            renderDpi, 
+            textPos.text,
+            textPos.fontSize,
+            textPos.fontFamily,
+            textPos.color,
+            textPos.opacity,
+            renderDpi,
             textPos.blur || 0,
-            canvasPadding, // Pass padding to function
-            textPos.rotation || 0 // Pass rotation
+            canvasPadding
           );
           const base64Data = textImageDataUrl.split(',')[1];
           const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
           const textImage = await pdfDoc.embedPng(imageBytes);
-        
-          // 2. Calculate image size in PDF Points
-          const imageWidthInPoints = textImage.width * scaleFactor;
-          const imageHeightInPoints = textImage.height * scaleFactor;
-          const paddingInPoints = canvasPadding * scaleFactor;
-        
-          /**
-           * 3. PIXEL-PERFECT COORDINATE LOGIC
-           * x, y from state should already be in PDF Points (converted from browser pixels using scaleFactor).
-           * 
-           * LOGIKA PERBAIKAN:
-           * textPos.y = Jarak dari TOP halaman ke TOP teks di browser (dalam PDF Points).
-           * Kita ingin TOP teks di PDF berada tepat di textPos.y.
-           * 
-           * PDF uses bottom-left coordinate system (Y=0 at bottom)
-           * Browser uses top-left coordinate system (Y=0 at top)
-           * 
-           * Karena teks di dalam image ada di bawah padding (padding pixels dari top image),
-           * maka:
-           * - Titik TOP Image = (pageHeight - textPos.y) + paddingInPoints
-           * - Titik BOTTOM Image (pdfY) = Titik TOP Image - Total Tinggi Image
-           */
-          // Posisi X: Geser ke kiri sebesar padding agar teks mulai tepat di x
-          const pdfX = textPos.x - paddingInPoints;
-          
-          // Posisi Y: 
-          // pageHeight - textPos.y = Posisi TOP teks dari bawah (sistem PDF)
-          // Karena teks di dalam image ada di bawah padding, maka:
-          // Titik TOP Image = (pageHeight - textPos.y) + paddingInPoints
-          // Titik BOTTOM Image (pdfY) = Titik TOP Image - Total Tinggi Image
-          const pdfY = (pageHeight - textPos.y) + paddingInPoints - imageHeightInPoints;
-        
-          // Draw image with padding offset so text top is at textPos.y
-          // Note: Do not round coordinates too early to maintain precision
+
+          // 2. Ukuran gambar dalam PDF points
+          const imageWidthInPoints = textImage.width * pointsPerCanvasPixel;
+          const imageHeightInPoints = textImage.height * pointsPerCanvasPixel;
+          const paddingInPoints = canvasPadding * pointsPerCanvasPixel;
+
+          // 3. Kotak gambar di view space. textPos.x/y adalah sudut kiri-atas
+          //    TEKS, sedangkan gambar punya padding di sekelilingnya, jadi
+          //    kotak gambar digeser sebesar padding ke kiri-atas.
+          //    Pivot rotasi tetap di sudut kiri-atas teks agar sama dengan
+          //    `transform-origin: top left` di editor.
+          const drawRect = viewRectToDrawRect(
+            {
+              x: textPos.x - paddingInPoints,
+              y: textPos.y - paddingInPoints,
+              width: imageWidthInPoints,
+              height: imageHeightInPoints,
+              rotation: textPos.rotation || 0,
+              pivot: { x: textPos.x, y: textPos.y },
+            },
+            layout
+          );
+
           page.drawImage(textImage, {
-            x: pdfX,
-            y: pdfY, 
-            width: imageWidthInPoints,
-            height: imageHeightInPoints,
+            x: drawRect.x,
+            y: drawRect.y,
+            width: drawRect.width,
+            height: drawRect.height,
+            rotate: degrees(drawRect.rotate),
           });
         }
 
@@ -2240,8 +2097,7 @@ function SignEditorContent() {
                                   positions={positions}
                                   textPositions={textPositions.get(key) || []}
                                   sessionSignature={sessionSignature}
-                                  onDrop={(e, pdfSize, scale) => handleThumbnailDrop(currentFileId, pageNum, e, pdfSize, scale)}
-                                  onDragOver={(e, pdfSize, scale) => handleDragOver(currentFileId, pageNum, e, pdfSize, scale)}
+                                  onDrop={(pdfSize, point) => handleThumbnailDrop(currentFileId, pageNum, pdfSize, point)}
                                   onSignatureMove={handleSignatureMove}
                                   onSignatureResize={handleSignatureResize}
                                   onSignatureRemove={handleSignatureRemove}

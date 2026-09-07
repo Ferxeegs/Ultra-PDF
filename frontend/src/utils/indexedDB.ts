@@ -3,6 +3,8 @@
  * Mengurangi penggunaan RAM dengan menyimpan file di disk browser
  */
 
+import { readFileWithProgress } from './fileIngest';
+
 const DB_NAME = 'ultra-pdf-storage';
 const DB_VERSION = 1;
 const STORE_NAME = 'files';
@@ -46,12 +48,22 @@ class IndexedDBManager {
 
   /**
    * Menyimpan file ke IndexedDB
+   *
+   * `onProgress` menerima rasio pembacaan berkas (0-1) supaya UI bisa
+   * menampilkan persentase unggahan yang nyata untuk berkas besar.
    */
-  async saveFile(id: string, file: File): Promise<void> {
+  async saveFile(
+    id: string,
+    file: File,
+    onProgress?: (ratio: number) => void
+  ): Promise<void> {
     await this.init();
     if (!this.db) throw new Error('Database not initialized');
 
-    const arrayBuffer = await file.arrayBuffer();
+    // Baca per potongan agar pemanggil bisa menampilkan persentase sebenarnya
+    const arrayBuffer = await readFileWithProgress(file, (loaded, total) => {
+      onProgress?.(total > 0 ? loaded / total : 1);
+    });
     const record: FileRecord = {
       id,
       arrayBuffer,

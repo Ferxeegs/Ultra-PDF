@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1.endpoints import router as api_router
+from app.api.v1.convert import router as convert_router
+from app.api.v1.security import router as security_router
 from app.middleware.security import SecurityHeadersMiddleware
 from app.middleware.rate_limit import get_rate_limiter
 from slowapi.errors import RateLimitExceeded
@@ -57,7 +59,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS if ENV == "production" else ["*"],  # Strict di production
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],  # Tambahkan OPTIONS untuk preflight
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],  # DELETE dipakai untuk membatalkan job konversi
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],  # Tambahkan headers yang diperlukan
     expose_headers=["Content-Disposition"],
     max_age=3600,  # Cache preflight untuk 1 jam
@@ -88,7 +90,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if origin and (origin in ALLOWED_ORIGINS or ENV != "production"):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
     
     return response
@@ -131,6 +133,8 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Include router
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(convert_router, prefix="/api/v1/convert", tags=["convert"])
+app.include_router(security_router, prefix="/api/v1/security", tags=["security"])
 
 @app.get("/")
 async def root():

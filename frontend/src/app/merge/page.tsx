@@ -5,14 +5,19 @@ import { useRouter } from "next/navigation";
 import { ShieldCheck, FileText, Lock, MousePointer2 } from "lucide-react";
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
 import Footer from "@/components/Footer";
-import { indexedDBManager } from "@/utils/indexedDB";
+import UploadProgress from "@/components/UploadProgress";
+import { useFileIngest } from "@/hooks/useFileIngest";
 
 export default function MergePage() {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const fileUploadZoneRef = useRef<FileUploadZoneRef>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const upload = useFileIngest();
 
   const addFiles = async (files: File[]) => {
+    if (isSaving) return;
+
     const pdfFiles = files.filter(
       (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
     );
@@ -27,23 +32,23 @@ export default function MergePage() {
       return;
     }
 
+    setIsSaving(true);
+
     try {
       // Generate session ID untuk batch files
       const sessionId = `merge-${Date.now()}-${Math.random()}`;
-      const fileIds: string[] = [];
 
-      // Simpan setiap file ke IndexedDB
-      for (const file of pdfFiles) {
-        const fileId = `${file.name}-${Date.now()}-${Math.random()}`;
-        await indexedDBManager.saveFile(fileId, file);
-        fileIds.push(fileId);
+      // Unggah ke IndexedDB sambil melaporkan persentase per berkas
+      const saved = await upload.ingest(pdfFiles);
+      const fileIds = saved.map((entry) => entry.id);
 
-        // Simpan metadata ke sessionStorage
+      // Simpan metadata tiap berkas ke sessionStorage
+      for (const entry of saved) {
         const fileMetadata = {
-          id: fileId,
-          name: file.name,
+          id: entry.id,
+          name: entry.file.name,
         };
-        sessionStorage.setItem(`pdf-merge-${fileId}`, JSON.stringify(fileMetadata));
+        sessionStorage.setItem(`pdf-merge-${entry.id}`, JSON.stringify(fileMetadata));
       }
 
       // Simpan session info dengan list file IDs
@@ -58,6 +63,9 @@ export default function MergePage() {
       router.push(`/merge/editor?session=${encodeURIComponent(sessionId)}`);
     } catch (error) {
       console.error("Error saving files:", error);
+      setIsSaving(false);
+      upload.reset();
+      fileUploadZoneRef.current?.reset();
       alert("Error menyimpan file. Pastikan browser mendukung IndexedDB dan ada cukup ruang penyimpanan.");
     }
   };
@@ -96,21 +104,34 @@ export default function MergePage() {
         {/* Main Application Interface */}
         <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-700 overflow-hidden transition-all duration-500">
           <div className="p-2">
-            <FileUploadZone
-              ref={fileUploadZoneRef}
-              isDragging={isDragging}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { 
-                e.preventDefault(); 
-                setIsDragging(false); 
-                addFiles(Array.from(e.dataTransfer.files)); 
-              }}
-              onFileChange={handleFileChange}
-              multiple={true}
-              label="Tarik dan lepas file PDF di sini"
-              subLabel="atau klik untuk memilih file (minimal 2 file)"
-            />
+            {isSaving ? (
+              <UploadProgress
+                percent={upload.percent}
+                items={upload.items}
+                loadedBytes={upload.loadedBytes}
+                totalBytes={upload.totalBytes}
+                speed={upload.speed}
+                eta={upload.eta}
+                currentName={upload.currentName}
+                accent="blue"
+              />
+            ) : (
+              <FileUploadZone
+                ref={fileUploadZoneRef}
+                isDragging={isDragging}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => { 
+                  e.preventDefault(); 
+                  setIsDragging(false); 
+                  addFiles(Array.from(e.dataTransfer.files)); 
+                }}
+                onFileChange={handleFileChange}
+                multiple={true}
+                label="Tarik dan lepas file PDF di sini"
+                subLabel="atau klik untuk memilih file (minimal 2 file)"
+              />
+            )}
           </div>
         </div>
 

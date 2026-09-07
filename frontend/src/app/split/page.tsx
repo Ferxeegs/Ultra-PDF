@@ -5,37 +5,44 @@ import { useRouter } from "next/navigation";
 import { ShieldCheck, Scissors, Lock, MousePointer2 } from "lucide-react";
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
 import Footer from "@/components/Footer";
-import { indexedDBManager } from "@/utils/indexedDB";
+import UploadProgress from "@/components/UploadProgress";
+import { useFileIngest } from "@/hooks/useFileIngest";
 
 export default function SplitPage() {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const fileUploadZoneRef = useRef<FileUploadZoneRef>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const upload = useFileIngest();
 
   const addFile = async (file: File) => {
+    if (isSaving) return;
+
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
       alert("Hanya file PDF yang didukung");
       return;
     }
 
+    setIsSaving(true);
+
     try {
-      // Generate unique file ID
-      const fileId = `${file.name}-${Date.now()}-${Math.random()}`;
-      
-      // Store file in IndexedDB (supports large files)
-      await indexedDBManager.saveFile(fileId, file);
+      // Unggah ke IndexedDB sambil melaporkan persentase yang sebenarnya
+      const [saved] = await upload.ingest([file]);
 
       // Store only ID and fileName in sessionStorage (small data)
       const fileMetadata = {
-        id: fileId,
+        id: saved.id,
         name: file.name,
       };
-      sessionStorage.setItem(`pdf-split-${fileId}`, JSON.stringify(fileMetadata));
+      sessionStorage.setItem(`pdf-split-${saved.id}`, JSON.stringify(fileMetadata));
 
       // Navigate to editor
-      router.push(`/split/editor?id=${encodeURIComponent(fileId)}`);
+      router.push(`/split/editor?id=${encodeURIComponent(saved.id)}`);
     } catch (error) {
       console.error("Error saving file:", error);
+      setIsSaving(false);
+      upload.reset();
+      fileUploadZoneRef.current?.reset();
       alert("Error menyimpan file. Pastikan browser mendukung IndexedDB dan ada cukup ruang penyimpanan.");
     }
   };
@@ -74,22 +81,35 @@ export default function SplitPage() {
         {/* Main Application Interface */}
         <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-100 dark:border-slate-700 overflow-hidden transition-all duration-500">
           <div className="p-2">
-            <FileUploadZone
-              ref={fileUploadZoneRef}
-              isDragging={isDragging}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { 
-                e.preventDefault(); 
-                setIsDragging(false); 
-                const file = e.dataTransfer.files[0];
-                if (file) addFile(file);
-              }}
-              onFileChange={handleFileChange}
-              multiple={false}
-              label="Tarik dan lepas file PDF di sini"
-              subLabel="atau klik untuk memilih file (satu file)"
-            />
+            {isSaving ? (
+              <UploadProgress
+                percent={upload.percent}
+                items={upload.items}
+                loadedBytes={upload.loadedBytes}
+                totalBytes={upload.totalBytes}
+                speed={upload.speed}
+                eta={upload.eta}
+                currentName={upload.currentName}
+                accent="blue"
+              />
+            ) : (
+              <FileUploadZone
+                ref={fileUploadZoneRef}
+                isDragging={isDragging}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => { 
+                  e.preventDefault(); 
+                  setIsDragging(false); 
+                  const file = e.dataTransfer.files[0];
+                  if (file) addFile(file);
+                }}
+                onFileChange={handleFileChange}
+                multiple={false}
+                label="Tarik dan lepas file PDF di sini"
+                subLabel="atau klik untuk memilih file (satu file)"
+              />
+            )}
           </div>
         </div>
 

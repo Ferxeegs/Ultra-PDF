@@ -223,8 +223,55 @@ class PDFService:
             logger.error(f"Error during PPT conversion: {e}", exc_info=True)
             return None, unique_user_dir
 
+    # Ukuran halaman baku dalam milimeter (lebar, tinggi) untuk orientasi potret
+    PAGE_SIZES_MM = {
+        "a4": (210.0, 297.0),
+        "letter": (215.9, 279.4),
+        "a5": (148.0, 210.0),
+        "a3": (297.0, 420.0),
+    }
+
     @staticmethod
-    async def convert_image_to_pdf(input_paths: list[str], output_path: str):
+    def _build_image_layout(page_size: str, orientation: str, margin_mm: float):
+        """
+        Bangun layout img2pdf, atau None bila halaman harus mengikuti ukuran gambar.
+
+        Margin tanpa ukuran halaman tetap diabaikan: img2pdf butuh pagesize
+        untuk tahu ke mana gambar harus dikecilkan.
+        """
+        size = PDFService.PAGE_SIZES_MM.get((page_size or "auto").lower())
+        if not size:
+            return None
+
+        width_mm, height_mm = size
+        if (orientation or "portrait").lower() == "landscape":
+            width_mm, height_mm = height_mm, width_mm
+
+        border_pt = img2pdf.mm_to_pt(max(0.0, margin_mm))
+
+        return img2pdf.get_layout_fun(
+            pagesize=(img2pdf.mm_to_pt(width_mm), img2pdf.mm_to_pt(height_mm)),
+            border=(border_pt, border_pt),
+            fit=img2pdf.FitMode.into,
+        )
+
+    @staticmethod
+    async def convert_image_to_pdf(
+        input_paths: list[str],
+        output_path: str,
+        page_size: str = "auto",
+        orientation: str = "portrait",
+        margin_mm: float = 0.0,
+    ):
+        """
+        Gabungkan gambar menjadi PDF.
+
+        page_size: "auto" mengikuti ukuran asli gambar, atau "a4"/"letter"
+        untuk halaman berukuran tetap.
+        orientation: "portrait" atau "landscape", hanya berlaku bila page_size
+        bukan "auto".
+        margin_mm: jarak tepi dalam milimeter.
+        """
         if not input_paths:
             logger.error("No input images provided")
             return False
@@ -233,10 +280,14 @@ class PDFService:
         os.makedirs(output_dir, exist_ok=True)
 
         try:
+            layout_fun = PDFService._build_image_layout(page_size, orientation, margin_mm)
 
             def perform_conversion():
                 with open(output_path, "wb") as f:
-                    f.write(img2pdf.convert(input_paths))
+                    if layout_fun:
+                        f.write(img2pdf.convert(input_paths, layout_fun=layout_fun))
+                    else:
+                        f.write(img2pdf.convert(input_paths))
 
             await asyncio.to_thread(perform_conversion)
 

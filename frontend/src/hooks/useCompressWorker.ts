@@ -17,22 +17,26 @@ export function useCompressWorker() {
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fungsi untuk mensimulasikan pergerakan progress kompresi (dari 99% ke 100%)
+  /**
+   * Menggerakkan bar selama server mengompres.
+   *
+   * Ghostscript tidak melaporkan progres, jadi rentang 85-99% diisi animasi
+   * lambat agar user tahu prosesnya masih berjalan, bukan macet.
+   */
   const startCompressionProgress = useCallback(() => {
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
     }
 
-    // Mulai dari 99% dan bergerak pelan ke 100%
-    setProgress(99);
-    
-    const stepTime = 100; // Update setiap 100ms
-    let currentProgress = 99;
-    
+    setProgress(85);
+
+    const stepTime = 200; // Update setiap 200ms
+    let currentProgress = 85;
+
     progressIntervalRef.current = setInterval(() => {
-      currentProgress += 0.1; // Naik 0.1% setiap 100ms
-      if (currentProgress >= 99.9) {
-        currentProgress = 99.9; // Hentikan di 99.9%, akan di-set ke 100% saat selesai
+      currentProgress += 0.35;
+      if (currentProgress >= 99) {
+        currentProgress = 99; // Berhenti di 99%, 100% disetel saat file diterima
         if (progressIntervalRef.current) {
           clearInterval(progressIntervalRef.current);
           progressIntervalRef.current = null;
@@ -71,7 +75,7 @@ export function useCompressWorker() {
       formData.append("file", fileObject.file);
       formData.append("quality", quality);
 
-      // Step 1: Upload dengan real progress (0% - 99%)
+      // Step 1: Upload dengan real progress (0% - 85%)
       setProgressMessage("Mengupload file ke server...");
       
       // Gunakan XMLHttpRequest untuk mendapatkan upload progress yang real
@@ -79,13 +83,24 @@ export function useCompressWorker() {
         const xhr = new XMLHttpRequest();
         xhrRef.current = xhr;
 
-        // Track upload progress (0% - 99%)
+        // Track upload progress (0% - 85%)
         xhr.upload.addEventListener("progress", (event) => {
           if (event.lengthComputable) {
-            // Upload progress: 0% - 99% (sisakan 1% untuk kompresi)
-            const uploadProgress = Math.min(99, (event.loaded / event.total) * 99);
+            // Upload mengisi 0-85%; sisanya untuk kompresi di server
+            const uploadProgress = Math.min(85, (event.loaded / event.total) * 85);
             setProgress(uploadProgress);
+            setProgressMessage(
+              uploadProgress >= 85
+                ? "Unggahan selesai, menunggu server..."
+                : "Mengupload file ke server..."
+            );
           }
+        });
+
+        // Seluruh berkas sudah terkirim: masuk fase kompresi di server
+        xhr.upload.addEventListener("load", () => {
+          setProgressMessage("Server sedang mengompres PDF...");
+          startCompressionProgress();
         });
 
         // Handle response
@@ -149,10 +164,7 @@ export function useCompressWorker() {
         xhr.send(formData);
       });
 
-      // Step 2: Server Processing (99% - 100%)
-      setProgressMessage("Server sedang mengompres PDF...");
-      startCompressionProgress();
-
+      // Step 2: Server Processing (85% - 99%) sudah berjalan sejak upload selesai
       if (!response.ok) {
         // Try to get error message from response
         let errorMessage = `Server error: ${response.status} ${response.statusText}`;

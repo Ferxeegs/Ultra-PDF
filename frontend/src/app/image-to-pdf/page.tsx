@@ -4,8 +4,6 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
     ShieldCheck,
-    Image as ImageIcon,
-    Loader2,
     Zap,
     Lock,
     MousePointer2
@@ -13,19 +11,22 @@ import {
 import FileUploadZone, { FileUploadZoneRef } from "@/components/FileUploadZone";
 import Footer from "@/components/Footer";
 import { indexedDBManager } from "@/utils/indexedDB";
+import UploadProgress from "@/components/UploadProgress";
+import { useFileIngest } from "@/hooks/useFileIngest";
 
 export default function ImageToPdfPage() {
     const router = useRouter();
     const [isDragging, setIsDragging] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const fileUploadZoneRef = useRef<FileUploadZoneRef>(null);
+    const upload = useFileIngest();
 
     /**
      * Menangani file yang dipilih atau di-drop
      * Gambar disimpan ke IndexedDB agar bisa diakses di halaman Editor
      */
     const handleFiles = async (files: FileList | null) => {
-        if (!files || files.length === 0) return;
+        if (isSaving || !files || files.length === 0) return;
 
         // Filter hanya file gambar
         const imageFiles = Array.from(files).filter(
@@ -43,19 +44,17 @@ export default function ImageToPdfPage() {
             // Bersihkan storage lama sebelum memulai batch baru agar tidak tertukar
             await indexedDBManager.clearAll();
 
-            // Simpan setiap file ke IndexedDB
-            for (const file of imageFiles) {
-                const fileId = `${file.name}-${Date.now()}-${Math.random()}`;
-                await indexedDBManager.saveFile(fileId, file);
-            }
+            // Unggah ke IndexedDB sambil melaporkan persentase per gambar
+            await upload.ingest(imageFiles);
 
             // Setelah selesai simpan, arahkan ke halaman editor
             router.push("/image-to-pdf/editor");
         } catch (error) {
             console.error("Gagal memproses gambar:", error);
-            alert("Terjadi kesalahan saat mempersiapkan gambar. Silakan coba lagi.");
-        } finally {
             setIsSaving(false);
+            upload.reset();
+            fileUploadZoneRef.current?.reset();
+            alert("Terjadi kesalahan saat mempersiapkan gambar. Silakan coba lagi.");
         }
     };
 
@@ -83,14 +82,18 @@ export default function ImageToPdfPage() {
                 <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-100 dark:border-slate-700 overflow-hidden">
                     <div className="p-2">
                         {isSaving ? (
-                            /* Tampilan saat file sedang ditulis ke IndexedDB */
-                            <div className="h-48 flex flex-col items-center justify-center gap-4">
-                                <Loader2 className="w-12 h-12 animate-spin text-emerald-600" />
-                                <div className="text-center">
-                                    <p className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-tighter">Memproses Gambar</p>
-                                    <p className="text-xs text-slate-500 mt-1">Menyiapkan editor untuk Anda...</p>
-                                </div>
-                            </div>
+                            /* Progres nyata saat gambar ditulis ke IndexedDB */
+                            <UploadProgress
+                                percent={upload.percent}
+                                items={upload.items}
+                                loadedBytes={upload.loadedBytes}
+                                totalBytes={upload.totalBytes}
+                                speed={upload.speed}
+                                eta={upload.eta}
+                                currentName={upload.currentName}
+                                accent="emerald"
+                                title="Mengunggah Gambar"
+                            />
                         ) : (
                             <FileUploadZone
                                 ref={fileUploadZoneRef}

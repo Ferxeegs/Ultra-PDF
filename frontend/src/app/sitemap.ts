@@ -6,11 +6,23 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // Tambahkan path fitur-fitur baru Anda di sini
   const routes = [
     '',
+    '/convert',
+    '/image-converter',
     '/merge',
     '/split',
     '/compress',
     '/sign',
     '/organize',
+    '/docx-to-pdf',
+    '/pdf-to-word',
+    '/pdf-to-excel',
+    '/pdf-to-jpg',
+    '/jpg-to-pdf',
+    '/unlock-pdf',
+    '/protect-pdf',
+    '/ppt-to-pdf',
+    '/image-to-pdf',
+    '/remove-bg',
   ].map((route) => ({
     url: `${baseUrl}${route}`,
     lastModified: new Date(),
