@@ -32,7 +32,7 @@ from app.api.v1.convert import (
     _queue_job,
     _save_uploads,
 )
-from app.middleware.rate_limit import limiter
+from app.middleware.rate_limit import limiter, RATE_LIMIT_CHEAP, RATE_LIMIT_STANDARD
 from app.services.job_service import ConversionJob, job_store
 from app.services.security_service import (
     ALLOWED_PERMISSIONS,
@@ -85,7 +85,7 @@ def _translate_error(error: Exception) -> HTTPException:
 
 
 @router.post("/inspect")
-@limiter.limit("20/minute")
+@limiter.limit(RATE_LIMIT_CHEAP)
 async def inspect_pdf(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -164,7 +164,7 @@ async def _protect_all(
 
 
 @router.post("/unlock")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def unlock_pdf(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -212,7 +212,7 @@ async def unlock_pdf(
 
 
 @router.post("/protect")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def protect_pdf(
     request: Request,
     background_tasks: BackgroundTasks,

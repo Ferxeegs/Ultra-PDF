@@ -1,7 +1,6 @@
 import os
 import logging
 import asyncio
-import uuid
 import shutil
 from pathlib import Path
 import img2pdf
@@ -12,17 +11,31 @@ PROCESS_TIMEOUT = int(os.getenv("PROCESS_TIMEOUT", "300"))
 
 
 class PDFService:
+    # Preset Ghostscript beserta resolusi gambarnya. Resolusi ditulis eksplisit
+    # karena flag -dXxxImageResolution yang datang sesudah -dPDFSETTINGS akan
+    # menimpa nilai bawaan preset; kalau disamakan untuk semua level, pilihan
+    # kualitas praktis tidak berpengaruh apa-apa.
+    GS_QUALITY_PRESETS = {
+        "low": {"preset": "/screen", "color": 72, "gray": 72, "mono": 300},
+        "medium": {"preset": "/ebook", "color": 150, "gray": 150, "mono": 600},
+        "high": {"preset": "/printer", "color": 300, "gray": 300, "mono": 1200},
+    }
+
     @staticmethod
     def get_gs_settings(level: str):
-        settings = {
-            "low": "/screen",
-            "medium": "/ebook",
-            "high": "/printer",
-        }
-        return settings.get(level, "/ebook")
+        return PDFService.GS_QUALITY_PRESETS.get(
+            level, PDFService.GS_QUALITY_PRESETS["medium"]
+        )["preset"]
 
     @staticmethod
     async def compress_pdf(input_path: str, output_path: str, quality: str = "medium"):
+        """
+        Kecilkan PDF memakai Ghostscript.
+
+        Kalau hasilnya justru lebih besar dari aslinya - lazim terjadi pada PDF
+        yang sudah optimal atau didominasi vektor - berkas asli yang dipakai,
+        supaya menekan "Compress" tidak pernah menghasilkan berkas lebih gemuk.
+        """
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             return False
@@ -30,73 +43,75 @@ class PDFService:
         output_dir = os.path.dirname(output_path)
         os.makedirs(output_dir, exist_ok=True)
 
-        gs_setting = PDFService.get_gs_settings(quality)
+        settings = PDFService.GS_QUALITY_PRESETS.get(
+            quality, PDFService.GS_QUALITY_PRESETS["medium"]
+        )
 
         gs_command = [
             "gs",
             "-sDEVICE=pdfwrite",
             "-dCompatibilityLevel=1.4",
-            f"-dPDFSETTINGS={gs_setting}",
+            f"-dPDFSETTINGS={settings['preset']}",
             "-dNOPAUSE",
             "-dQUIET",
             "-dBATCH",
             "-dSAFER",
             "-dNOGC",
             "-dNOPLATFONTS",
-            "-dColorImageResolution=150",
-            "-dGrayImageResolution=150",
-            "-dMonoImageResolution=150",
+            f"-dColorImageResolution={settings['color']}",
+            f"-dGrayImageResolution={settings['gray']}",
+            f"-dMonoImageResolution={settings['mono']}",
             f"-sOutputFile={output_path}",
             input_path,
         ]
 
-        return await PDFService._execute_command(gs_command, "Compression")
+        if not await PDFService._execute_command(gs_command, "Compression"):
+            return False
+
+        if not os.path.exists(output_path):
+            return False
+
+        original_size = os.path.getsize(input_path)
+        compressed_size = os.path.getsize(output_path)
+        if compressed_size >= original_size:
+            logger.info(
+                f"Kompresi tidak menguntungkan ({compressed_size} >= {original_size} byte), "
+                "memakai berkas asli"
+            )
+            shutil.copyfile(input_path, output_path)
+
+        return True
 
     @staticmethod
     async def convert_docx_to_pdf(input_path: str, output_dir: str):
         """
-        Convert DOCX to PDF with isolated user profile to prevent race conditions.
-        
-        Returns tuple: (pdf_path, user_profile_dir) or (None, None) on failure
-        user_profile_dir should be cleaned up by caller after use
+        Konversi DOCX ke PDF lewat pool profil LibreOffice.
+
+        Dulu tiap request membuat profil baru di /tmp/libreoffice_<uuid> - path
+        POSIX yang di-hardcode, dan ongkos inisialisasi profil dibayar ulang
+        setiap konversi. ConvertService sudah punya pool yang memakai ulang
+        sejumlah profil, jadi konversi di sini ikut memakainya.
+
+        Mengembalikan tuple (pdf_path, profile_dir) demi kompatibilitas dengan
+        pemanggil lama; profile_dir selalu None karena pool yang mengurus
+        siklus hidupnya, jadi pemanggil tidak perlu membersihkan apa pun.
         """
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             return None, None
 
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Create unique user profile directory for this conversion
-        unique_user_dir = f"/tmp/libreoffice_{uuid.uuid4().hex}"
-        os.makedirs(unique_user_dir, exist_ok=True)
+        # Impor lokal supaya tidak ada lingkaran impor antar modul layanan
+        from app.services.convert_service import ConvertService
 
         try:
-            command = [
-                "libreoffice",
-                f"-env:UserInstallation=file://{unique_user_dir}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                output_dir,
-                input_path,
-            ]
-
-            success = await PDFService._execute_command(command, "DOCX Conversion")
-
-            if success:
-                file_stem = Path(input_path).stem
-                expected_pdf_path = os.path.join(output_dir, f"{file_stem}.pdf")
-
-                if os.path.exists(expected_pdf_path):
-                    logger.info(f"DOCX conversion success: {expected_pdf_path}")
-                    return expected_pdf_path, unique_user_dir
-
-            return None, unique_user_dir
-
+            pdf_path = await ConvertService.office_to_pdf(input_path, output_dir)
         except Exception as e:
             logger.error(f"Error during DOCX conversion: {e}", exc_info=True)
-            return None, unique_user_dir
+            return None, None
+
+        if pdf_path:
+            logger.info(f"DOCX conversion success: {pdf_path}")
+        return pdf_path, None
 
     @staticmethod
     def _detect_ppt_slide_size(input_path: str) -> tuple[float, float] | None:
@@ -153,75 +168,46 @@ class PDFService:
     @staticmethod
     async def convert_ppt_to_pdf(input_path: str, output_dir: str):
         """
-        Convert PPT/PPTX to PDF with high precision using:
-        1. Isolated LibreOffice user profile (prevents race conditions)
-        2. Dynamic page size detection from slide dimensions
-        3. Post-processing with Ghostscript /prepress (embeds fonts properly, sets correct page size)
-        
-        Returns tuple: (pdf_path, user_profile_dir) or (None, None) on failure
-        user_profile_dir should be cleaned up by caller after use
+        Konversi PPT/PPTX ke PDF lewat pool profil LibreOffice.
+
+        Keluaran LibreOffice dipakai apa adanya tanpa pasca-proses Ghostscript,
+        karena /prepress sempat mengubah skala teks sehingga ukurannya tidak lagi
+        sama dengan slide aslinya.
+
+        Mengembalikan tuple (pdf_path, profile_dir) demi kompatibilitas dengan
+        pemanggil lama; profile_dir selalu None karena pool yang mengurus siklus
+        hidupnya.
         """
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             return None, None
 
-        os.makedirs(output_dir, exist_ok=True)
+        # Impor lokal supaya tidak ada lingkaran impor antar modul layanan
+        from app.services.convert_service import ConvertService
 
-        # Detect slide dimensions before conversion
-        slide_dimensions = await asyncio.to_thread(PDFService._detect_ppt_slide_size, input_path)
-        
-        # Create unique user profile directory for this conversion
-        # This prevents race conditions when multiple conversions run simultaneously
-        unique_user_dir = f"/tmp/libreoffice_{uuid.uuid4().hex}"
-        os.makedirs(unique_user_dir, exist_ok=True)
+        slide_dimensions = await asyncio.to_thread(
+            PDFService._detect_ppt_slide_size, input_path
+        )
 
         try:
-            # Step 1: Convert PPT to PDF using LibreOffice with isolated profile
-            # LibreOffice will preserve slide dimensions and text size automatically
-            # Use default PDF export settings to maintain original appearance
-            command = [
-                "libreoffice",
-                f"-env:UserInstallation=file://{unique_user_dir}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                output_dir,
-                input_path,
-            ]
-
-            success = await PDFService._execute_command(command, "PPT Conversion")
-
-            if not success:
-                logger.error("LibreOffice conversion failed")
-                return None, unique_user_dir
-
-            file_stem = Path(input_path).stem
-            libreoffice_pdf_path = os.path.join(output_dir, f"{file_stem}.pdf")
-
-            if not os.path.exists(libreoffice_pdf_path):
-                logger.error(f"LibreOffice output not found: {libreoffice_pdf_path}")
-                return None, unique_user_dir
-
-            # Step 2: Use LibreOffice output directly to preserve exact text size
-            # LibreOffice already embeds fonts and preserves dimensions correctly
-            # Ghostscript post-processing can cause text scaling issues, so we skip it
-            # This ensures text size matches the original PPT exactly
-            
-            if slide_dimensions:
-                width_pts, height_pts = slide_dimensions
-                logger.info(f"Detected slide size: {width_pts/72:.2f}\" x {height_pts/72:.2f}\" - using LibreOffice output directly to preserve text size")
-            else:
-                logger.info("Using LibreOffice output directly to preserve original text size and layout")
-            
-            # Return LibreOffice output directly without Ghostscript processing
-            # This prevents any scaling that might change text size
-            logger.info(f"PPT conversion success (LibreOffice direct output): {libreoffice_pdf_path}")
-            return libreoffice_pdf_path, unique_user_dir
-
+            pdf_path = await ConvertService.office_to_pdf(input_path, output_dir)
         except Exception as e:
             logger.error(f"Error during PPT conversion: {e}", exc_info=True)
-            return None, unique_user_dir
+            return None, None
+
+        if not pdf_path:
+            logger.error("LibreOffice conversion failed")
+            return None, None
+
+        if slide_dimensions:
+            width_pts, height_pts = slide_dimensions
+            logger.info(
+                f"Detected slide size: {width_pts / 72:.2f}\" x {height_pts / 72:.2f}\" - "
+                "memakai keluaran LibreOffice apa adanya agar ukuran teks terjaga"
+            )
+
+        logger.info(f"PPT conversion success: {pdf_path}")
+        return pdf_path, None
 
     # Ukuran halaman baku dalam milimeter (lebar, tinggi) untuk orientasi potret
     PAGE_SIZES_MM = {

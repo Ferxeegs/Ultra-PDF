@@ -10,14 +10,10 @@ from PIL import Image
 from PIL.Image import Image as PILImage
 from scipy.ndimage import (
     binary_closing,
-    binary_dilation,
-    binary_erosion,
     binary_fill_holes,
     gaussian_filter,
     label,
     maximum_filter,
-    median_filter,
-    minimum_filter,
     sobel,
     uniform_filter,
 )

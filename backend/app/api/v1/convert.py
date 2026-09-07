@@ -27,7 +27,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.middleware.rate_limit import limiter
+from app.middleware.rate_limit import limiter, RATE_LIMIT_EXPENSIVE, RATE_LIMIT_STANDARD
 from app.services.convert_service import (
     OFFICE_INPUT_EXTENSIONS,
     ConvertService,
@@ -301,6 +301,29 @@ async def _convert_to_pdf(
     return outputs
 
 
+def _page_reporter(
+    job: Optional[ConversionJob], index: int, total: int, name: str
+):
+    """
+    Petakan kemajuan per halaman ke potongan bar progres milik berkas ini.
+
+    Tanpa ini konversi panjang (terutama OCR yang butuh detik per halaman)
+    membuat bar diam di angka yang sama sampai seluruh berkas selesai.
+    """
+    if job is None:
+        return None
+
+    start = 5 + (index - 1) / total * 85
+    span = 85 / total
+
+    def report(done: int, pages: int) -> None:
+        # Dipanggil dari thread pekerja; hanya menulis atribut sederhana
+        job.progress = int(start + span * (done / max(pages, 1)))
+        job.message = f"Mengonversi {name} (halaman {done}/{pages})"
+
+    return report
+
+
 async def _convert_from_pdf(
     saved: list[tuple[str, str]],
     workdir: str,
@@ -322,12 +345,14 @@ async def _convert_from_pdf(
             job.progress = int(5 + (index - 1) / total * 85)
             job.message = f"Mengonversi {original_name}"
 
+        report = _page_reporter(job, index, total, original_name)
+
         if target == "docx":
             result = os.path.join(workdir, f"{stem}.docx")
-            ok = await ConvertService.pdf_to_docx(path, result)
+            ok = await ConvertService.pdf_to_docx(path, result, progress=report)
         elif target == "xlsx":
             result = os.path.join(workdir, f"{stem}.xlsx")
-            ok = await ConvertService.pdf_to_xlsx(path, result)
+            ok = await ConvertService.pdf_to_xlsx(path, result, progress=report)
         elif target == "pptx":
             result = os.path.join(workdir, f"{stem}.pptx")
             ok = await ConvertService.pdf_to_pptx(path, result, dpi=dpi)
@@ -369,11 +394,13 @@ async def _convert_from_pdf(
         elif target in ("txt", "md"):
             result = os.path.join(workdir, f"{stem}.{target}")
             ok = await ConvertService.pdf_to_text(
-                path, result, text_format=target, pages=pages
+                path, result, text_format=target, pages=pages, progress=report
             )
         elif target == "epub":
             result = os.path.join(workdir, f"{stem}.epub")
-            ok = await ConvertService.pdf_to_epub(path, result, title=stem)
+            ok = await ConvertService.pdf_to_epub(
+                path, result, title=stem, progress=report
+            )
         elif target == "pdfa":
             result = os.path.join(workdir, f"{stem}-pdfa.pdf")
             ok = await ConvertService.pdf_to_pdfa(path, result, version=pdfa_version)
@@ -411,7 +438,7 @@ async def list_formats():
 
 
 @router.post("/to-pdf")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def convert_to_pdf(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -491,7 +518,7 @@ async def convert_to_pdf(
 
 
 @router.post("/from-pdf")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def convert_from_pdf(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -599,7 +626,7 @@ def _assert_public_url(url: str) -> str:
 
 
 @router.post("/url-to-pdf")
-@limiter.limit("5/minute")
+@limiter.limit(RATE_LIMIT_EXPENSIVE)
 async def convert_url_to_pdf(
     request: Request,
     background_tasks: BackgroundTasks,

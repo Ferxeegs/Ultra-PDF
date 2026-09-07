@@ -186,10 +186,6 @@ export function usesLibreOffice(fileName: string): boolean {
   return OFFICE_EXTENSIONS.includes(getExtension(fileName));
 }
 
-export function isSupportedSource(fileName: string): boolean {
-  return detectSourceKind(fileName) !== null;
-}
-
 const KIND_LABELS: Record<SourceKind, string> = {
   pdf: "PDF",
   document: "Dokumen",

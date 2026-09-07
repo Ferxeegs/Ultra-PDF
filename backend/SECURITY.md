@@ -3,10 +3,20 @@
 Dokumentasi fitur keamanan yang telah diimplementasikan pada UltraPDF Backend API.
 
 ## 1. Rate Limiting
-- **10 requests per minute** per IP address
-- **100 requests per hour** per IP address
+Batas per IP address, dikelompokkan menurut biaya kerja endpoint:
+
+| Tier | Default | Endpoint |
+|------|---------|----------|
+| `RATE_LIMIT_EXPENSIVE` | 5/minute | `/convert/url-to-pdf`, `/convert-docx`, `/convert-ppt` |
+| `RATE_LIMIT_STANDARD` | 10/minute | `/convert/to-pdf`, `/convert/from-pdf`, `/compress`, `/convert-image`, `/remove-bg`, `/security/unlock`, `/security/protect`, `/tools/ocr` |
+| `RATE_LIMIT_MODERATE` | 15/minute | `/tools/compare` |
+| `RATE_LIMIT_CHEAP` | 20/minute | `/security/inspect`, `/tools/watermark`, `/tools/page-numbers`, `/tools/crop`, `/tools/repair` |
+
 - Mencegah abuse dan DDoS attacks
-- Konfigurasi melalui environment variables: `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_HOUR`
+- Tiap tier bisa ditimpa lewat environment variable dengan nama yang sama,
+  formatnya `<jumlah>/<second|minute|hour|day>` (mis. `RATE_LIMIT_CHEAP=30/minute`)
+- Nilai yang formatnya tidak valid diabaikan: default dipakai dan peringatan dicatat di log,
+  supaya salah ketik tidak mematikan endpoint
 
 ## 2. CORS Configuration
 - **Development**: Allow all origins (`*`)
@@ -86,8 +96,7 @@ Semua konfigurasi keamanan dapat diatur melalui environment variables:
 - `ENV`: development | production
 - `ALLOWED_ORIGINS`: Comma-separated list of allowed origins
 - `MAX_FILE_SIZE_MB`: Maximum file size in MB
-- `RATE_LIMIT_PER_MINUTE`: Rate limit per minute
-- `RATE_LIMIT_PER_HOUR`: Rate limit per hour
+- `RATE_LIMIT_EXPENSIVE` / `RATE_LIMIT_STANDARD` / `RATE_LIMIT_MODERATE` / `RATE_LIMIT_CHEAP`: Rate limit per tier (lihat bagian 1)
 - `GS_TIMEOUT`: Ghostscript timeout in seconds
 
 ## Best Practices untuk Production
