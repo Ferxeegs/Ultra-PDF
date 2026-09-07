@@ -15,8 +15,26 @@ export interface TargetOption {
   /** Ekstensi berkas hasil, dipakai untuk nama unduhan default */
   extension: string;
   /** Opsi tambahan yang relevan untuk target ini */
-  options?: Array<"dpi" | "pages" | "pdfaVersion">;
+  options?: TargetOptionKey[];
 }
+
+export type TargetOptionKey =
+  | "dpi"
+  | "pages"
+  | "pdfaVersion"
+  /** Ambil objek gambar yang tertanam, bukan merender halaman */
+  | "extractImages";
+
+/** Ukuran halaman yang bisa dipilih saat gambar dijadikan PDF */
+export const PAGE_SIZE_OPTIONS = [
+  { id: "auto", label: "Ikut ukuran gambar" },
+  { id: "a4", label: "A4" },
+  { id: "a3", label: "A3" },
+  { id: "a5", label: "A5" },
+  { id: "letter", label: "Letter" },
+] as const;
+
+export type PageSizeId = (typeof PAGE_SIZE_OPTIONS)[number]["id"];
 
 /** Ekstensi yang bisa dikonversi menjadi PDF, dikelompokkan agar mudah dijelaskan ke pengguna */
 export const SOURCE_GROUPS: Record<Exclude<SourceKind, "pdf">, string[]> = {
@@ -49,6 +67,14 @@ export const PDF_TARGETS: TargetOption[] = [
     extension: "xlsx",
   },
   {
+    id: "csv",
+    label: "CSV (tabel)",
+    description:
+      "Tiap tabel yang terdeteksi menjadi satu berkas CSV terpisah. Butuh PDF yang memang punya tabel.",
+    extension: "csv",
+    options: ["pages"],
+  },
+  {
     id: "pptx",
     label: "PowerPoint (.pptx)",
     description: "Tiap halaman menjadi satu slide.",
@@ -60,14 +86,28 @@ export const PDF_TARGETS: TargetOption[] = [
     label: "Gambar JPG",
     description: "Render tiap halaman menjadi JPG. Lebih dari satu halaman diunduh sebagai ZIP.",
     extension: "jpg",
-    options: ["dpi", "pages"],
+    options: ["dpi", "pages", "extractImages"],
   },
   {
     id: "png",
     label: "Gambar PNG",
     description: "Render tiap halaman menjadi PNG tanpa kompresi lossy.",
     extension: "png",
-    options: ["dpi", "pages"],
+    options: ["dpi", "pages", "extractImages"],
+  },
+  {
+    id: "webp",
+    label: "Gambar WebP",
+    description: "Ukuran berkas paling kecil untuk kualitas yang sama, cocok untuk web.",
+    extension: "webp",
+    options: ["dpi", "pages", "extractImages"],
+  },
+  {
+    id: "tiff",
+    label: "Gambar TIFF",
+    description: "Lossless dengan kompresi deflate, biasa dipakai untuk arsip dan cetak.",
+    extension: "tiff",
+    options: ["dpi", "pages", "extractImages"],
   },
   {
     id: "txt",
@@ -81,6 +121,13 @@ export const PDF_TARGETS: TargetOption[] = [
     label: "Markdown (.md)",
     description: "Teks dengan struktur heading per halaman.",
     extension: "md",
+    options: ["pages"],
+  },
+  {
+    id: "html",
+    label: "HTML",
+    description: "Satu berkas HTML dengan posisi teks dipertahankan, siap dibuka di browser.",
+    extension: "html",
     options: ["pages"],
   },
   {
@@ -120,6 +167,23 @@ export function detectSourceKind(fileName: string): SourceKind | null {
   }
 
   return null;
+}
+
+/**
+ * Ekstensi yang dikonversi lewat LibreOffice.
+ *
+ * Hanya jalur ini yang bisa mengekspor PDF/A secara langsung, jadi opsi arsip
+ * pada konversi ke PDF hanya ditawarkan bila batch memuat berkas seperti ini.
+ */
+export const OFFICE_EXTENSIONS: string[] = [
+  ".doc", ".docx", ".odt", ".rtf", ".txt",
+  ".xls", ".xlsx", ".ods", ".csv",
+  ".ppt", ".pptx", ".odp",
+  ".html", ".htm",
+];
+
+export function usesLibreOffice(fileName: string): boolean {
+  return OFFICE_EXTENSIONS.includes(getExtension(fileName));
 }
 
 export function isSupportedSource(fileName: string): boolean {

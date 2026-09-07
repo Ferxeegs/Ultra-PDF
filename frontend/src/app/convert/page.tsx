@@ -24,14 +24,18 @@ import { useUniversalConvert } from "@/hooks/useUniversalConvert";
 import { API_ENDPOINTS } from "@/utils/api";
 import {
   ALL_SOURCE_EXTENSIONS,
+  PAGE_SIZE_OPTIONS,
   PDF_TARGETS,
+  PageSizeId,
   SourceKind,
   TO_PDF_TARGET,
   TargetOption,
+  TargetOptionKey,
   describeKind,
   detectSourceKind,
   getExtension,
   rasterizeSvg,
+  usesLibreOffice,
 } from "@/utils/convertFormats";
 
 interface SelectedFile {
@@ -59,8 +63,13 @@ export default function ConvertPage() {
   const [dpi, setDpi] = useState(150);
   const [pages, setPages] = useState("");
   const [pdfaVersion, setPdfaVersion] = useState(2);
+  const [extractImages, setExtractImages] = useState(false);
   const [fitToPage, setFitToPage] = useState(false);
   const [mergeImages, setMergeImages] = useState(false);
+  const [pageSize, setPageSize] = useState<PageSizeId>("auto");
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [marginMm, setMarginMm] = useState(0);
+  const [archivePdf, setArchivePdf] = useState(false);
   const [forceBackground, setForceBackground] = useState(false);
 
   const [url, setUrl] = useState("");
@@ -75,6 +84,8 @@ export default function ConvertPage() {
     files.some((item) => item.kind === "pdf") && files.some((item) => item.kind !== "pdf");
   const hasImages = files.some((item) => item.kind === "image");
   const hasSpreadsheet = files.some((item) => item.kind === "spreadsheet");
+  // PDF/A langsung hanya tersedia lewat jalur ekspor LibreOffice
+  const hasOfficeDoc = files.some((item) => usesLibreOffice(item.file.name));
   const totalSize = files.reduce((sum, item) => sum + item.file.size, 0);
   const useBackground = forceBackground || totalSize > BACKGROUND_SIZE_THRESHOLD;
 
@@ -88,8 +99,11 @@ export default function ConvertPage() {
     [availableTargets, targetId]
   );
 
-  const targetSupports = (option: "dpi" | "pages" | "pdfaVersion") =>
+  const targetSupports = (option: TargetOptionKey) =>
     Boolean(activeTarget?.options?.includes(option));
+
+  // Mengambil gambar tertanam tidak melalui proses render, jadi DPI tidak berlaku
+  const isExtractingImages = targetSupports("extractImages") && extractImages;
 
   const addFiles = (incoming: FileList | File[]) => {
     const accepted: SelectedFile[] = [];
@@ -171,9 +185,12 @@ export default function ConvertPage() {
 
     if (sourceIsPdf) {
       formData.append("target", activeTarget.id);
-      if (targetSupports("dpi")) formData.append("dpi", String(dpi));
+      if (targetSupports("dpi") && !isExtractingImages) formData.append("dpi", String(dpi));
       if (targetSupports("pages") && pages.trim()) formData.append("pages", pages.trim());
       if (targetSupports("pdfaVersion")) formData.append("pdfa_version", String(pdfaVersion));
+      if (targetSupports("extractImages")) {
+        formData.append("extract_images", String(extractImages));
+      }
 
       await convert({
         endpoint: API_ENDPOINTS.convertFromPdf,
@@ -184,7 +201,14 @@ export default function ConvertPage() {
     }
 
     if (hasSpreadsheet) formData.append("fit_to_page", String(fitToPage));
-    if (hasImages) formData.append("merge_images", String(mergeImages));
+    if (hasOfficeDoc && archivePdf) formData.append("pdf_variant", "pdfa");
+
+    if (hasImages) {
+      formData.append("merge_images", String(mergeImages));
+      formData.append("page_size", pageSize);
+      if (pageSize !== "auto") formData.append("orientation", orientation);
+      formData.append("margin_mm", String(marginMm));
+    }
 
     await convert({
       endpoint: API_ENDPOINTS.convertToPdf,
@@ -229,7 +253,7 @@ export default function ConvertPage() {
           </h1>
           <p className="text-slate-500 dark:text-slate-400 text-lg font-medium max-w-xl mx-auto">
             Word, Excel, PowerPoint, gambar, HTML, Markdown, EPUB, hingga PDF ke Word,
-            Excel, gambar, teks, dan PDF/A. Bisa banyak berkas sekaligus.
+            Excel, CSV, gambar, teks, HTML, dan PDF/A. Bisa banyak berkas sekaligus.
           </p>
         </header>
 
@@ -455,7 +479,25 @@ export default function ConvertPage() {
 
                   {/* Opsi khusus target */}
                   <div className="space-y-4">
-                    {targetSupports("dpi") && (
+                    {targetSupports("extractImages") && (
+                      <label className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={extractImages}
+                          onChange={(event) => setExtractImages(event.target.checked)}
+                          className="w-4 h-4 mt-0.5 accent-violet-600"
+                        />
+                        <span>
+                          Ambil gambar yang tertanam saja
+                          <span className="block text-xs text-slate-400 dark:text-slate-500">
+                            Keluarkan foto asli di dalam PDF tanpa teks dan latar
+                            halaman, bukan merender seluruh halaman.
+                          </span>
+                        </span>
+                      </label>
+                    )}
+
+                    {targetSupports("dpi") && !isExtractingImages && (
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
                           Resolusi: {dpi} DPI
@@ -516,16 +558,95 @@ export default function ConvertPage() {
                       </label>
                     )}
 
-                    {!sourceIsPdf && hasImages && (
-                      <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300">
+                    {!sourceIsPdf && hasOfficeDoc && (
+                      <label className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
                         <input
                           type="checkbox"
-                          checked={mergeImages}
-                          onChange={(event) => setMergeImages(event.target.checked)}
-                          className="w-4 h-4 accent-violet-600"
+                          checked={archivePdf}
+                          onChange={(event) => setArchivePdf(event.target.checked)}
+                          className="w-4 h-4 mt-0.5 accent-violet-600"
                         />
-                        Gabungkan semua gambar menjadi satu PDF
+                        <span>
+                          Simpan sebagai PDF/A (arsip)
+                          <span className="block text-xs text-slate-400 dark:text-slate-500">
+                            Font ikut ditanam agar dokumen tetap terbaca sama dalam
+                            jangka panjang. Ukuran berkas jadi lebih besar.
+                          </span>
+                        </span>
                       </label>
+                    )}
+
+                    {!sourceIsPdf && hasImages && (
+                      <>
+                        <label className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={mergeImages}
+                            onChange={(event) => setMergeImages(event.target.checked)}
+                            className="w-4 h-4 accent-violet-600"
+                          />
+                          Gabungkan semua gambar menjadi satu PDF
+                        </label>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                            Ukuran halaman gambar
+                          </label>
+                          <select
+                            value={pageSize}
+                            onChange={(event) => setPageSize(event.target.value as PageSizeId)}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                          >
+                            {PAGE_SIZE_OPTIONS.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Orientasi dan margin tidak berarti bila halaman mengikuti ukuran gambar */}
+                        {pageSize !== "auto" && (
+                          <>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                                Orientasi
+                              </label>
+                              <div className="flex gap-2">
+                                {(["portrait", "landscape"] as const).map((value) => (
+                                  <button
+                                    key={value}
+                                    type="button"
+                                    onClick={() => setOrientation(value)}
+                                    className={`flex-1 py-2 rounded-lg text-sm font-semibold border-2 transition-all ${
+                                      orientation === value
+                                        ? "border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300"
+                                        : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:border-violet-300"
+                                    }`}
+                                  >
+                                    {value === "portrait" ? "Tegak" : "Mendatar"}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                                Margin: {marginMm} mm
+                              </label>
+                              <input
+                                type="range"
+                                min={0}
+                                max={50}
+                                step={1}
+                                value={marginMm}
+                                onChange={(event) => setMarginMm(Number(event.target.value))}
+                                className="w-full accent-violet-600"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
 
                     <label className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">

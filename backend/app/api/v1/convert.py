@@ -55,8 +55,14 @@ IMAGE_EXTENSIONS = {
 # Ekstensi yang bisa dikonversi menjadi PDF
 TO_PDF_EXTENSIONS = OFFICE_INPUT_EXTENSIONS | IMAGE_EXTENSIONS | {".md", ".markdown", ".epub"}
 
+# Target gambar: dirender per halaman, atau diambil sebagai objek gambar
+# tertanam bila extract_images aktif
+IMAGE_TARGETS = {"jpg", "png", "webp", "tiff"}
+
 # Target yang tersedia untuk sumber PDF
-FROM_PDF_TARGETS = {"docx", "xlsx", "pptx", "jpg", "png", "txt", "md", "epub", "pdfa"}
+FROM_PDF_TARGETS = {
+    "docx", "xlsx", "csv", "pptx", "txt", "md", "html", "epub", "pdfa",
+} | IMAGE_TARGETS
 
 MEDIA_TYPES = {
     ".pdf": "application/pdf",
@@ -67,8 +73,12 @@ MEDIA_TYPES = {
     ".txt": "text/plain; charset=utf-8",
     ".md": "text/markdown; charset=utf-8",
     ".epub": "application/epub+zip",
+    ".csv": "text/csv; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
     ".jpg": "image/jpeg",
     ".png": "image/png",
+    ".webp": "image/webp",
+    ".tiff": "image/tiff",
 }
 
 # Peta format sumber -> daftar target, dipakai halaman convert universal di frontend
@@ -156,6 +166,22 @@ async def _save_uploads(
         saved.append((path, sanitize_filename(upload.filename or Path(path).name)))
 
     return saved
+
+
+def _pack_many(
+    produced: list[str], workdir: str, stem: str, total_documents: int
+) -> str:
+    """
+    Satu dokumen sumber bisa menghasilkan banyak berkas (halaman gambar, tabel
+    CSV). Berkas tunggal dikirim apa adanya, selebihnya dibungkus ZIP per
+    dokumen supaya hasil tiap sumber tetap terpisah.
+    """
+    if len(produced) == 1 and total_documents == 1:
+        return produced[0]
+
+    zip_path = os.path.join(workdir, f"{stem}.zip")
+    create_zip(produced, zip_path)
+    return zip_path
 
 
 def _collect_result(
@@ -305,7 +331,7 @@ async def _convert_from_pdf(
         elif target == "pptx":
             result = os.path.join(workdir, f"{stem}.pptx")
             ok = await ConvertService.pdf_to_pptx(path, result, dpi=dpi)
-        elif target in ("jpg", "png"):
+        elif target in IMAGE_TARGETS:
             if extract_images:
                 images = await ConvertService.pdf_extract_images(
                     path, workdir, image_format=target, pages=pages, base_name=stem
@@ -323,14 +349,23 @@ async def _convert_from_pdf(
                 if not images:
                     raise RuntimeError(f"Gagal merender {original_name}")
 
-            # Satu PDF bisa menghasilkan banyak gambar: bungkus per dokumen
-            if len(images) == 1 and total == 1:
-                outputs.extend(images)
-            else:
-                zip_path = os.path.join(workdir, f"{stem}.zip")
-                create_zip(images, zip_path)
-                outputs.append(zip_path)
+            outputs.append(_pack_many(images, workdir, stem, total))
             continue
+        elif target == "csv":
+            tables = await ConvertService.pdf_to_csv(
+                path, workdir, pages=pages, base_name=stem
+            )
+            if not tables:
+                raise ValueError(
+                    f"Tidak ada tabel yang terdeteksi di {original_name}. "
+                    "Coba target Excel yang punya cadangan ekstraksi teks."
+                )
+
+            outputs.append(_pack_many(tables, workdir, stem, total))
+            continue
+        elif target == "html":
+            result = os.path.join(workdir, f"{stem}.html")
+            ok = await ConvertService.pdf_to_html(path, result, pages=pages)
         elif target in ("txt", "md"):
             result = os.path.join(workdir, f"{stem}.{target}")
             ok = await ConvertService.pdf_to_text(
@@ -469,9 +504,11 @@ async def convert_from_pdf(
     mode: str = Form("sync"),
 ):
     """
-    PDF -> Word, Excel, PowerPoint, JPG, PNG, teks, Markdown, EPUB, atau PDF/A.
+    PDF -> Word, Excel, CSV, PowerPoint, JPG/PNG/WebP/TIFF, teks, Markdown,
+    HTML, EPUB, atau PDF/A.
 
-    pages: rentang halaman seperti "1-3,7" (berlaku untuk gambar dan teks).
+    pages: rentang halaman seperti "1-3,7" (berlaku untuk gambar, tabel, teks,
+    dan HTML).
     dpi: resolusi render untuk target gambar dan PowerPoint.
     extract_images: khusus target gambar, ambil objek gambar yang tertanam di
     dalam PDF alih-alih merender seluruh halaman.

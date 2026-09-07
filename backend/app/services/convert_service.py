@@ -7,8 +7,10 @@ membayar ongkos pembuatan profil baru seperti pada PDFService.
 """
 
 import asyncio
+import csv
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -50,6 +52,29 @@ PDF_EXPORT_FILTERS = {
     "impress": "impress_pdf_Export",
     "draw": "draw_pdf_Export",
 }
+
+# Ekstensi gambar yang bisa dihasilkan dari PDF. PyMuPDF hanya bisa menulis
+# JPG dan PNG sendiri; WebP dan TIFF ditulis lewat Pillow.
+IMAGE_TARGET_EXTENSIONS = {
+    "jpg": "jpg",
+    "jpeg": "jpg",
+    "png": "png",
+    "webp": "webp",
+    "tif": "tiff",
+    "tiff": "tiff",
+}
+
+PILLOW_IMAGE_FORMATS = {"webp": "WEBP", "tiff": "TIFF"}
+
+
+def resolve_image_extension(image_format: str) -> str:
+    """Normalkan nama format gambar menjadi ekstensi berkas yang dipakai."""
+    extension = IMAGE_TARGET_EXTENSIONS.get((image_format or "").lower())
+    if not extension:
+        allowed = ", ".join(sorted(set(IMAGE_TARGET_EXTENSIONS)))
+        raise ValueError(f"Format gambar harus salah satu dari: {allowed}")
+    return extension
+
 
 SPREADSHEET_EXTENSIONS = {".xls", ".xlsx", ".ods", ".csv"}
 PRESENTATION_EXTENSIONS = {".ppt", ".pptx", ".odp"}
@@ -442,13 +467,7 @@ class ConvertService:
         fitz = ConvertService._import_fitz()
         os.makedirs(output_dir, exist_ok=True)
 
-        image_format = image_format.lower()
-        if image_format in ("jpg", "jpeg"):
-            extension = "jpg"
-        elif image_format == "png":
-            extension = "png"
-        else:
-            raise ValueError("Format gambar harus png atau jpg")
+        extension = resolve_image_extension(image_format)
 
         def perform_conversion() -> list[str]:
             document = fitz.open(input_path)
@@ -464,10 +483,7 @@ class ConvertService:
                     image_path = os.path.join(
                         output_dir, f"{base_name}_{page_index + 1:03d}.{extension}"
                     )
-                    if extension == "jpg":
-                        pixmap.save(image_path, jpg_quality=90)
-                    else:
-                        pixmap.save(image_path)
+                    ConvertService._save_pixmap(pixmap, image_path, extension, 90)
                     results.append(image_path)
 
                 return results
@@ -496,7 +512,7 @@ class ConvertService:
         fitz = ConvertService._import_fitz()
         os.makedirs(output_dir, exist_ok=True)
 
-        extension = "jpg" if image_format.lower() in ("jpg", "jpeg") else "png"
+        extension = resolve_image_extension(image_format)
 
         def perform_extraction() -> list[str]:
             document = fitz.open(input_path)
@@ -529,10 +545,9 @@ class ConvertService:
                                 output_dir,
                                 f"{base_name}_{page_index + 1:03d}_{len(results) + 1:02d}.{extension}",
                             )
-                            if extension == "jpg":
-                                pixmap.save(image_path, jpg_quality=95)
-                            else:
-                                pixmap.save(image_path)
+                            ConvertService._save_pixmap(
+                                pixmap, image_path, extension, 95
+                            )
                             results.append(image_path)
                         finally:
                             pixmap = None
@@ -600,6 +615,115 @@ class ConvertService:
             return False
 
         return os.path.exists(output_path)
+
+    @staticmethod
+    async def pdf_to_html(
+        input_path: str, output_path: str, pages: Optional[str] = None
+    ) -> bool:
+        """
+        Ekstrak PDF menjadi satu berkas HTML yang mempertahankan tata letak.
+
+        PyMuPDF mengeluarkan dokumen HTML lengkap per halaman, jadi isi <body>
+        tiap halaman diambil lalu dijahit menjadi satu berkas agar hasilnya
+        tetap satu dokumen yang bisa dibuka langsung di browser.
+        """
+        fitz = ConvertService._import_fitz()
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+        def perform_conversion():
+            document = fitz.open(input_path)
+            try:
+                selected = parse_page_ranges(pages, document.page_count)
+                sections: list[str] = []
+
+                for page_index in selected:
+                    page = document.load_page(page_index)
+                    body = ConvertService._extract_html_body(page.get_text("html"))
+                    sections.append(
+                        f'<section class="halaman" id="halaman-{page_index + 1}">\n'
+                        f"{body}\n</section>"
+                    )
+
+                title = Path(input_path).stem
+                content = "\n".join(sections)
+                Path(output_path).write_text(
+                    ConvertService._wrap_html(title, content, page_break_class="halaman"),
+                    encoding="utf-8",
+                )
+            finally:
+                document.close()
+
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.error("PDF ke HTML timeout")
+            return False
+        except Exception as e:
+            logger.error(f"Error saat konversi PDF ke HTML: {e}", exc_info=True)
+            return False
+
+        return os.path.exists(output_path)
+
+    @staticmethod
+    async def pdf_to_csv(
+        input_path: str,
+        output_dir: str,
+        pages: Optional[str] = None,
+        base_name: str = "tabel",
+    ) -> list[str]:
+        """
+        Ekstrak tiap tabel di PDF menjadi satu berkas CSV.
+
+        Berbeda dengan pdf_to_xlsx yang menumpuk semua tabel dalam satu buku
+        kerja, di sini tiap tabel berdiri sendiri supaya mudah diimpor ke alat
+        lain. Mengembalikan daftar path CSV yang dihasilkan.
+        """
+        fitz = ConvertService._import_fitz()
+        os.makedirs(output_dir, exist_ok=True)
+
+        def perform_conversion() -> list[str]:
+            document = fitz.open(input_path)
+            try:
+                selected = parse_page_ranges(pages, document.page_count)
+                results: list[str] = []
+
+                for page_index in selected:
+                    page = document.load_page(page_index)
+                    try:
+                        tables = page.find_tables()
+                    except Exception:
+                        continue
+
+                    for table_index, table in enumerate(tables.tables, start=1):
+                        rows = table.extract()
+                        if not rows:
+                            continue
+
+                        csv_path = os.path.join(
+                            output_dir,
+                            f"{base_name}_{page_index + 1:03d}_{table_index:02d}.csv",
+                        )
+                        # utf-8-sig supaya Excel di Windows membaca karakter
+                        # non-ASCII dengan benar
+                        with open(
+                            csv_path, "w", newline="", encoding="utf-8-sig"
+                        ) as handle:
+                            writer = csv.writer(handle)
+                            for row in rows:
+                                writer.writerow(
+                                    ["" if cell is None else str(cell) for cell in row]
+                                )
+                        results.append(csv_path)
+
+                return results
+            finally:
+                document.close()
+
+        return await asyncio.wait_for(
+            asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+        )
 
     # ------------------------------------------------------------------
     # HTML / Markdown -> PDF
@@ -880,6 +1004,36 @@ class ConvertService:
     # Helper
     # ------------------------------------------------------------------
     @staticmethod
+    def _save_pixmap(
+        pixmap, image_path: str, extension: str, jpg_quality: int = 90
+    ) -> None:
+        """
+        Tulis pixmap PyMuPDF ke berkas gambar.
+
+        PyMuPDF hanya bisa menulis JPG dan PNG; WebP dan TIFF dibangun ulang
+        lewat Pillow dari buffer piksel mentah agar tidak perlu berkas antara.
+        """
+        pillow_format = PILLOW_IMAGE_FORMATS.get(extension)
+
+        if pillow_format is None:
+            if extension == "jpg":
+                pixmap.save(image_path, jpg_quality=jpg_quality)
+            else:
+                pixmap.save(image_path)
+            return
+
+        from PIL import Image
+
+        mode = "RGBA" if pixmap.alpha else "RGB"
+        image = Image.frombytes(mode, (pixmap.width, pixmap.height), pixmap.samples)
+
+        if pillow_format == "WEBP":
+            image.save(image_path, "WEBP", quality=jpg_quality, method=4)
+        else:
+            # LZW/deflate menjaga TIFF tetap lossless tanpa membengkak
+            image.save(image_path, "TIFF", compression="tiff_deflate")
+
+    @staticmethod
     def _import_fitz():
         # Nama modul "fitz" sudah deprecated; "pymupdf" dipakai lebih dulu
         try:
@@ -933,6 +1087,22 @@ class ConvertService:
 
         logger.error(f"{task_name}: output tidak ditemukan di {expected_path}")
         return None
+
+    # Cocokkan isi <body> beserta atributnya, lintas baris
+    _BODY_PATTERN = re.compile(
+        r"<body[^>]*>(.*)</body>", re.IGNORECASE | re.DOTALL
+    )
+
+    @staticmethod
+    def _extract_html_body(html: str) -> str:
+        """
+        Ambil isi <body> dari dokumen HTML.
+
+        Keluaran PyMuPDF adalah dokumen HTML utuh per halaman; tanpa langkah ini
+        berkas gabungan akan berisi banyak <html> bersarang.
+        """
+        match = ConvertService._BODY_PATTERN.search(html)
+        return match.group(1).strip() if match else html.strip()
 
     @staticmethod
     def _wrap_html(
