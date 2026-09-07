@@ -1,210 +1,354 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  FileText,
-  Menu,
-  X,
-  Zap,
-  Sun,
-  Moon,
-  Scissors,
-  Settings,
+  ChevronDown,
   Grid3x3,
-  PenTool,
-  FileCode,
-  Image as ImageIcon,
-  Eraser,
-  Repeat,
-  Images,
-  FileImage,
-  ImagePlus,
-  FileType,
-  Sheet,
-  Unlock,
-  ShieldCheck,
-  Archive,
-  BookOpen,
-  Braces,
-  Code2,
-  Hash,
-  Presentation,
-  Table,
-  Type,
+  Menu,
+  Moon,
+  Settings,
+  Sun,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { useTheme } from "next-themes";
+import {
+  getPrimaryNavTools,
+  getToolsByCategory,
+  TOOL_CATEGORIES,
+  type ToolCategoryId,
+} from "@/utils/toolsCatalog";
 
 export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openDesktopCategory, setOpenDesktopCategory] = useState<ToolCategoryId | null>(null);
+  const [openMobileCategory, setOpenMobileCategory] = useState<ToolCategoryId | null>("organize");
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
   const pathname = usePathname();
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const megaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const navItems = [
-    { name: "Convert", href: "/convert", icon: Repeat },
-    { name: "Konversi Gambar", href: "/image-converter", icon: Images },
-    { name: "Merge", href: "/merge", icon: FileText },
-    { name: "Split", href: "/split", icon: Scissors },
-    { name: "Word to PDF", href: "/docx-to-pdf", icon: FileCode },
-    { name: "Excel to PDF", href: "/excel-to-pdf", icon: Sheet },
-    { name: "PDF to Word", href: "/pdf-to-word", icon: FileType },
-    { name: "PDF to Excel", href: "/pdf-to-excel", icon: Sheet },
-    { name: "PDF to PowerPoint", href: "/pdf-to-powerpoint", icon: Presentation },
-    { name: "PDF to JPG", href: "/pdf-to-jpg", icon: FileImage },
-    { name: "PDF to PNG", href: "/pdf-to-png", icon: FileImage },
-    { name: "JPG to PDF", href: "/jpg-to-pdf", icon: ImagePlus },
-    { name: "PDF to CSV", href: "/pdf-to-csv", icon: Table },
-    { name: "PDF to Teks", href: "/pdf-to-text", icon: Type },
-    { name: "PDF to HTML", href: "/pdf-to-html", icon: Braces },
-    { name: "PDF to EPUB", href: "/pdf-to-epub", icon: BookOpen },
-    { name: "PDF to PDF/A", href: "/pdf-to-pdfa", icon: Archive },
-    { name: "Teks to PDF", href: "/txt-to-pdf", icon: Type },
-    { name: "Markdown to PDF", href: "/markdown-to-pdf", icon: Hash },
-    { name: "HTML to PDF", href: "/html-to-pdf", icon: Code2 },
-    { name: "EPUB to PDF", href: "/epub-to-pdf", icon: BookOpen },
-    { name: "Unlock PDF", href: "/unlock-pdf", icon: Unlock },
-    { name: "Protect PDF", href: "/protect-pdf", icon: ShieldCheck },
-    { name: "Image to PDF", href: "/image-to-pdf", icon: ImageIcon },
-    { name: "Remove BG", href: "/remove-bg", icon: Eraser },
-    { name: "Organize", href: "/organize", icon: Grid3x3 },
-    { name: "Sign", href: "/sign", icon: PenTool },
-    { name: "Compress", href: "/compress", icon: Zap },
-    { name: "Settings", href: "/settings", icon: Settings },
-    // Kamu bisa tambah 10 fitur lagi di sini dan Navbar tidak akan pecah
-  ];
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+    setOpenDesktopCategory(null);
+  }, [pathname]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!megaRef.current?.contains(event.target as Node)) {
+        setOpenDesktopCategory(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenDesktopCategory(null);
+        setIsMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  const topLinks = getPrimaryNavTools().filter((tool) =>
+    ["/convert", "/merge", "/split", "/compress", "/sign"].includes(tool.href)
+  );
+
+  const isActive = (href: string) =>
+    href === "/"
+      ? pathname === "/"
+      : pathname === href || Boolean(pathname?.startsWith(`${href}/`));
+
+  const categoryHasActive = (categoryId: ToolCategoryId) =>
+    getToolsByCategory(categoryId).some((tool) => isActive(tool.href));
 
   return (
-    <nav className="sticky top-0 z-50 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/60 dark:border-slate-700/60">
+    <nav className="sticky top-0 z-50 w-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/70 dark:border-slate-700/70">
       <div className="max-w-[1440px] mx-auto px-4">
-        <div className="flex items-center h-20 gap-4">
-
-          {/* 1. LOGO - Tetap di kiri, tidak mengecil */}
+        <div className="flex items-center h-20 gap-3">
           <Link href="/" className="flex items-center gap-3 group flex-shrink-0">
-            <div className="relative w-9 h-9 transition-transform group-hover:scale-110">
+            <div className="relative w-9 h-9 transition-transform group-hover:scale-105">
               <div className="absolute inset-0 bg-blue-600 rounded-xl blur-lg opacity-20 group-hover:opacity-40 transition-opacity" />
               <Image
                 src="/icons/ultrapdf-ic.png"
-                alt="Logo"
+                alt="UltraPDF"
                 width={36}
                 height={36}
                 className="relative object-contain"
               />
             </div>
-            <div className="hidden lg:flex flex-col">
+            <div className="hidden sm:flex flex-col">
               <span className="text-xl font-black text-slate-900 dark:text-slate-100 leading-none tracking-tighter">
                 Ultra<span className="text-blue-600 dark:text-blue-400">PDF</span>
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold tracking-[0.1em] uppercase mt-0.5">
-                Digital Tools
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold tracking-[0.14em] uppercase mt-0.5">
+                Precision Tools
               </span>
             </div>
           </Link>
 
-          {/* 2. SCALABLE NAVIGATION - Bagian tengah yang bisa bergeser */}
-          <div className="hidden xl:flex flex-1 min-w-0 relative items-center group/nav">
-            {/* Masking Gradient (Kiri) */}
-            <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white dark:from-slate-900 to-transparent z-10 pointer-events-none opacity-0 group-hover/nav:opacity-100 transition-opacity" />
+          {/* Desktop nav */}
+          <div ref={megaRef} className="hidden lg:flex flex-1 items-center gap-1 min-w-0">
+            {topLinks.map((tool) => {
+              const Icon = tool.icon;
+              const active = isActive(tool.href);
+              const label =
+                tool.href === "/convert"
+                  ? "Convert"
+                  : tool.name.replace(" PDF", "");
+              return (
+                <Link
+                  key={tool.href}
+                  href={tool.href}
+                  className={`
+                    flex items-center gap-1.5 px-3 py-2 text-[13px] font-semibold rounded-lg whitespace-nowrap transition-colors
+                    ${active
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
+                    }
+                  `}
+                >
+                  <Icon size={15} strokeWidth={active ? 2.5 : 2} />
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
 
-            <div
-              ref={scrollContainerRef}
-              className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth px-4"
-              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-            >
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = item.href === "/"
-                  ? pathname === "/"
-                  : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            <div className="relative ml-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenDesktopCategory((prev) => (prev ? null : "organize"))
+                }
+                className={`
+                  flex items-center gap-1.5 px-3 py-2 text-[13px] font-semibold rounded-lg transition-colors
+                  ${openDesktopCategory || TOOL_CATEGORIES.some((c) => categoryHasActive(c.id))
+                    ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }
+                `}
+                aria-expanded={Boolean(openDesktopCategory)}
+              >
+                <Grid3x3 size={15} />
+                Semua Alat
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform ${openDesktopCategory ? "rotate-180" : ""}`}
+                />
+              </button>
 
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={`
-                      flex items-center gap-2 px-4 py-2.5 text-[13px] font-bold transition-all duration-300 rounded-xl whitespace-nowrap
-                      ${isActive
-                        ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
-                        : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100"
-                      }
-                    `}
-                  >
-                    <Icon size={16} strokeWidth={isActive ? 2.5 : 2} />
-                    <span>{item.name}</span>
-                  </Link>
-                );
-              })}
+              {openDesktopCategory && (
+                <div className="absolute left-0 top-full mt-2 w-[min(920px,calc(100vw-2rem))] rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/10 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  <div className="grid grid-cols-[200px_1fr]">
+                    <div className="bg-slate-50 dark:bg-slate-800/60 border-r border-slate-200 dark:border-slate-700 p-3 space-y-1">
+                      {TOOL_CATEGORIES.map((category) => {
+                        const selected = openDesktopCategory === category.id;
+                        return (
+                          <button
+                            key={category.id}
+                            type="button"
+                            onMouseEnter={() => setOpenDesktopCategory(category.id)}
+                            onClick={() => setOpenDesktopCategory(category.id)}
+                            className={`
+                              w-full text-left px-3 py-2.5 rounded-xl transition-colors
+                              ${selected
+                                ? "bg-white dark:bg-slate-900 shadow-sm text-blue-700 dark:text-blue-300"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-900/50"
+                              }
+                            `}
+                          >
+                            <div className="text-sm font-bold">{category.label}</div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                              {category.description}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="p-4 max-h-[420px] overflow-y-auto custom-scrollbar">
+                      <div className="grid grid-cols-2 xl:grid-cols-3 gap-1.5">
+                        {getToolsByCategory(openDesktopCategory).map((tool) => {
+                          const Icon = tool.icon;
+                          const active = isActive(tool.href);
+                          return (
+                            <Link
+                              key={tool.href}
+                              href={tool.href}
+                              onClick={() => setOpenDesktopCategory(null)}
+                              className={`
+                                flex items-start gap-3 px-3 py-2.5 rounded-xl transition-colors
+                                ${active
+                                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
+                                }
+                              `}
+                            >
+                              <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tool.bg}`}>
+                                <Icon size={16} className={tool.color} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold truncate">{tool.name}</div>
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug">
+                                  {tool.desc}
+                                </div>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Masking Gradient (Kanan) */}
-            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white dark:from-slate-900 to-transparent z-10 pointer-events-none opacity-0 group-hover/nav:opacity-100 transition-opacity" />
           </div>
 
-          {/* 3. ACTIONS - Tombol tema dan mobile toggle */}
           <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+            <Link
+              href="/settings"
+              className={`hidden md:flex p-2.5 rounded-xl transition-colors ${
+                isActive("/settings")
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-blue-200"
+              }`}
+              aria-label="Settings"
+            >
+              <Settings size={18} />
+            </Link>
+
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="group relative p-2.5 rounded-xl transition-all duration-300 bg-slate-100 dark:bg-slate-800 border border-transparent hover:border-blue-200 dark:hover:border-slate-600"
+              className="p-2.5 rounded-xl transition-all duration-300 bg-slate-100 dark:bg-slate-800"
               aria-label="Toggle theme"
             >
               {mounted ? (
                 theme === "dark" ? (
-                  <Sun size={20} className="text-amber-500 transition-all group-hover:rotate-45" />
+                  <Sun size={18} className="text-amber-500" />
                 ) : (
-                  <Moon size={20} className="text-slate-600 transition-all group-hover:-rotate-12" />
+                  <Moon size={18} className="text-slate-600" />
                 )
               ) : (
-                <div className="w-5 h-5" />
+                <div className="w-[18px] h-[18px]" />
               )}
             </button>
 
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="xl:hidden p-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+              className="lg:hidden p-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+              aria-label="Toggle menu"
             >
-              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
         </div>
 
-        {/* MOBILE DROPDOWN */}
+        {/* Mobile / tablet menu */}
         {isMobileMenuOpen && (
-          <div className="xl:hidden py-4 pb-6 space-y-1.5 border-t border-slate-100 dark:border-slate-800 animate-in slide-in-from-top-2 duration-300 max-h-[80vh] overflow-y-auto no-scrollbar">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = item.href === "/"
-                ? pathname === "/"
-                : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+          <div className="lg:hidden py-3 border-t border-slate-100 dark:border-slate-800 animate-in slide-in-from-top-2 duration-200 max-h-[min(78vh,640px)] overflow-y-auto custom-scrollbar">
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 mb-2">
+              {topLinks.map((tool) => {
+                const Icon = tool.icon;
+                const active = isActive(tool.href);
+                return (
+                  <Link
+                    key={tool.href}
+                    href={tool.href}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`
+                      flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold whitespace-nowrap
+                      ${active
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                      }
+                    `}
+                  >
+                    <Icon size={14} />
+                    {tool.name.replace(" PDF", "").replace(" Apa Saja", "")}
+                  </Link>
+                );
+              })}
+            </div>
+
+            {TOOL_CATEGORIES.map((category) => {
+              const expanded = openMobileCategory === category.id;
+              const tools = getToolsByCategory(category.id);
               return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`
-                    flex items-center gap-4 px-5 py-3.5 rounded-2xl text-sm font-bold
-                    ${isActive
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                <div key={category.id} className="mb-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenMobileCategory((prev) =>
+                        prev === category.id ? null : category.id
+                      )
                     }
-                  `}
-                >
-                  <Icon size={20} />
-                  {item.name}
-                </Link>
+                    className="w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <span>{category.label}</span>
+                    <span className="flex items-center gap-2 text-slate-400">
+                      <span className="text-[11px] font-semibold">{tools.length}</span>
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                      />
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div className="pb-2 space-y-0.5">
+                      {tools.map((tool) => {
+                        const Icon = tool.icon;
+                        const active = isActive(tool.href);
+                        return (
+                          <Link
+                            key={tool.href}
+                            href={tool.href}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={`
+                              flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold
+                              ${active
+                                ? "bg-blue-600 text-white"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                              }
+                            `}
+                          >
+                            <Icon size={18} />
+                            {tool.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
+
+            <Link
+              href="/settings"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`
+                mt-2 flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-bold
+                ${isActive("/settings")
+                  ? "bg-blue-600 text-white"
+                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                }
+              `}
+            >
+              <Settings size={18} />
+              Settings
+            </Link>
           </div>
         )}
       </div>
 
-      {/* CSS internal untuk sembunyikan scrollbar */}
       <style jsx global>{`
         .no-scrollbar::-webkit-scrollbar {
           display: none;
