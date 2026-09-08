@@ -8,6 +8,7 @@ membayar ongkos pembuatan profil baru seperti pada PDFService.
 
 import asyncio
 import csv
+import io
 import logging
 import os
 import re
@@ -46,6 +47,30 @@ OCR_DPI = int(os.getenv("OCR_DPI", "300"))
 OCR_LANGUAGE = os.getenv("OCR_LANGUAGE", "ind+eng")
 OCR_TIMEOUT_PER_PAGE = float(os.getenv("OCR_TIMEOUT_PER_PAGE", "15"))
 OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "300"))
+
+# Deteksi gambar halaman (logo kop surat, tanda tangan, stempel) pada PDF hasil
+# pindaian. Halaman dirender pada GRAPHIC_DPI untuk mencari areanya, lalu
+# potongannya dirender ulang pada GRAPHIC_RENDER_DPI supaya tetap tajam di Word.
+GRAPHIC_DPI = int(os.getenv("OCR_GRAPHIC_DPI", "150"))
+GRAPHIC_RENDER_DPI = int(os.getenv("OCR_GRAPHIC_RENDER_DPI", "220"))
+GRAPHIC_INK_THRESHOLD = int(os.getenv("OCR_GRAPHIC_INK_THRESHOLD", "200"))
+GRAPHIC_MIN_AREA_PT = float(os.getenv("OCR_GRAPHIC_MIN_AREA_PT", "40"))
+GRAPHIC_MAX_REGIONS = int(os.getenv("OCR_GRAPHIC_MAX_REGIONS", "12"))
+
+# Pembersihan halaman hasil foto: bidang kertas dicari pada citra yang
+# diperkecil ke PHOTO_EDGE_WORK_SIZE piksel, kemiringan diukur pada
+# PHOTO_SKEW_WORK_SIZE piksel, dan cahaya baru diratakan kalau selisih terang
+# gelap latarnya melewati PHOTO_SHADOW_SPREAD.
+PHOTO_EDGE_WORK_SIZE = int(os.getenv("PHOTO_EDGE_WORK_SIZE", "900"))
+PHOTO_SKEW_WORK_SIZE = int(os.getenv("PHOTO_SKEW_WORK_SIZE", "1200"))
+PHOTO_QUAD_MIN_AREA = float(os.getenv("PHOTO_QUAD_MIN_AREA", "0.3"))
+PHOTO_QUAD_MAX_AREA = float(os.getenv("PHOTO_QUAD_MAX_AREA", "0.97"))
+PHOTO_SHADOW_SPREAD = int(os.getenv("PHOTO_SHADOW_SPREAD", "25"))
+DESKEW_MIN_ANGLE = float(os.getenv("DESKEW_MIN_ANGLE", "0.3"))
+DESKEW_MAX_ANGLE = float(os.getenv("DESKEW_MAX_ANGLE", "12"))
+
+# Tinggi kotak hasil OCR dikali angka ini untuk memperkirakan ukuran huruf.
+OCR_FONT_HEIGHT_RATIO = float(os.getenv("OCR_FONT_HEIGHT_RATIO", "0.78"))
 
 # Ekstensi yang bisa dibuka LibreOffice dan diekspor ke PDF
 OFFICE_INPUT_EXTENSIONS = {
@@ -218,6 +243,80 @@ def create_zip(file_paths: list[str], output_path: str) -> str:
             archive.write(path, arcname)
 
     return output_path
+
+
+class PageCanvas:
+    """
+    Citra satu halaman PDF yang siap dipakai untuk OCR dan pemotongan gambar.
+
+    PDF hasil foto ponsel tidak pernah rapi: kertasnya miring, sisinya menjorok
+    karena perspektif, dan cahayanya tidak rata. Kanvas ini memegang versi
+    halaman yang sudah diluruskan beserta ukuran kertas hasil pelurusannya,
+    sehingga OCR, deteksi gambar, dan potongan logo maupun tanda tangan semuanya
+    memakai satu citra yang sama. Tanpa citra (OpenCV tidak terpasang) semua
+    permintaan jatuh kembali ke render langsung dari halaman PDF-nya.
+    """
+
+    def __init__(self, page, image=None, width_pt: float = 0.0, height_pt: float = 0.0):
+        self.page = page
+        self.image = image
+        self.width_pt = width_pt or page.rect.width
+        self.height_pt = height_pt or page.rect.height
+
+    @property
+    def scale(self) -> float:
+        """Jumlah piksel citra untuk tiap titik halaman."""
+        if self.image is None:
+            return OCR_DPI / 72.0
+        return self.image.shape[1] / max(self.width_pt, 1.0)
+
+    def to_png(self) -> bytes:
+        """Seluruh halaman sebagai PNG, untuk disodorkan ke mesin OCR."""
+        if self.image is None:
+            return self.page.get_pixmap(dpi=OCR_DPI).tobytes("png")
+
+        import cv2
+
+        ok, buffer = cv2.imencode(".png", self.image)
+        if not ok:
+            return self.page.get_pixmap(dpi=OCR_DPI).tobytes("png")
+        return buffer.tobytes()
+
+    def gray(self):
+        """Citra halaman dalam abu-abu, atau None bila citranya tidak ada."""
+        if self.image is None:
+            return None
+
+        import cv2
+
+        if self.image.ndim == 2:
+            return self.image
+        return cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+
+    def crop_png(self, bbox) -> Optional[bytes]:
+        """Potong satu kotak halaman (satuan titik) menjadi PNG."""
+        if self.image is None:
+            fitz = ConvertService._import_fitz()
+
+            rect = fitz.Rect(*bbox) + (-2.0, -2.0, 2.0, 2.0)
+            rect = rect & self.page.rect
+            if rect.is_empty:
+                return None
+            return self.page.get_pixmap(dpi=GRAPHIC_RENDER_DPI, clip=rect).tobytes("png")
+
+        import cv2
+
+        scale = self.scale
+        height, width = self.image.shape[:2]
+        left = max(int(round((bbox[0] - 2.0) * scale)), 0)
+        top = max(int(round((bbox[1] - 2.0) * scale)), 0)
+        right = min(int(round((bbox[2] + 2.0) * scale)), width)
+        bottom = min(int(round((bbox[3] + 2.0) * scale)), height)
+        if right <= left or bottom <= top:
+            return None
+
+        ok, buffer = cv2.imencode(".png", self.image[top:bottom, left:right])
+        return buffer.tobytes() if ok else None
 
 
 class ConvertService:
@@ -460,14 +559,21 @@ class ConvertService:
                 # selalu dirender dari PDF (rotasi halaman sudah diterapkan
                 # PyMuPDF), jadi orientasinya dijamin benar dan pemeriksaan itu
                 # hanya menambah risiko sekaligus memperlambat.
-                result, _ = engine(image_bytes, use_cls=False)
+                # return_word_box=True menambah kotak tiap karakter. Itu dipakai
+                # untuk mengembalikan spasi yang kadang tidak ikut dikenali pada
+                # tulisan kapital seperti nama instansi di kop surat.
+                result, _ = engine(image_bytes, use_cls=False, return_word_box=True)
                 if not result:
                     return []
 
-                # Tiap entri: [4 titik kotak, teks, skor]
+                # Tiap entri: [4 titik kotak, teks, skor, kotak karakter, karakter, skor]
                 items = []
-                for box, text, *_ in result:
-                    text = str(text)
+                for entry in result:
+                    box, text = entry[0], str(entry[1])
+                    if len(entry) >= 5:
+                        respaced = ConvertService._respace_ocr_text(entry[4], entry[3])
+                        if respaced:
+                            text = respaced
                     if not text.strip():
                         continue
                     xs = [point[0] for point in box]
@@ -518,6 +624,71 @@ class ConvertService:
         return read_with_tesseract
 
     @staticmethod
+    def _respace_ocr_text(chars, boxes) -> Optional[str]:
+        """
+        Kembalikan spasi yang hilang dari hasil pengenalan satu baris.
+
+        Model pengenal kerap menyatukan kata, apalagi pada foto yang agak buram:
+        nama instansi di kop surat terbaca seperti "DINASTEKNOLOGIINFORMASI".
+        Kotak tiap karakter masih memuat jaraknya, jadi celah yang jauh lebih
+        lebar daripada jarak antarhuruf biasa dikembalikan menjadi spasi. Spasi
+        yang sudah dikenali tidak diutak-atik.
+        """
+        if not chars or not boxes or len(chars) != len(boxes) or len(chars) < 3:
+            return None
+        if any(len(character) != 1 for character in chars):
+            return None
+
+        spans = []
+        for box in boxes:
+            try:
+                xs = [float(point[0]) for point in box]
+            except (TypeError, ValueError, IndexError):
+                return None
+            spans.append((min(xs), max(xs)))
+
+        # Kotak spasi tidak ikut dihitung: lebarnya bukan lebar huruf
+        widths = sorted(
+            max(right - left, 0.0)
+            for (left, right), character in zip(spans, chars)
+            if character.strip()
+        )
+        if not widths:
+            return None
+        width = widths[len(widths) // 2]
+        if width <= 0:
+            return None
+
+        gaps = [spans[index + 1][0] - spans[index][1] for index in range(len(spans) - 1)]
+        ordered = sorted(gaps)
+
+        # Kalau baris ini sudah punya spasi yang dikenali, lebar kotaknya adalah
+        # ukuran spasi yang sebenarnya pada tulisan itu, jadi dipakai sebagai
+        # patokan. Selain itu ambangnya sengaja tinggi: kotak per karakter cukup
+        # berisik, dan spasi yang telanjur disisipkan di tengah kata lebih
+        # merepotkan daripada spasi yang tetap hilang.
+        space_widths = sorted(
+            right - left
+            for (left, right), character in zip(spans, chars)
+            if not character.strip()
+        )
+        if space_widths:
+            base = space_widths[len(space_widths) // 2] * 0.75
+        else:
+            base = width * 0.72
+        threshold = max(ordered[len(ordered) // 2] + width * 0.5, base)
+
+        parts = [chars[0]]
+        for index, gap in enumerate(gaps):
+            neighbours_are_glyphs = chars[index].strip() and chars[index + 1].strip()
+            if gap > threshold and neighbours_are_glyphs:
+                parts.append(" ")
+            parts.append(chars[index + 1])
+
+        respaced = "".join(parts)
+        return respaced if respaced != "".join(chars) else None
+
+    @staticmethod
     def _require_ocr_reader():
         """Ambil pembaca OCR, atau tolak permintaan dengan pesan yang jelas."""
         reader = ConvertService._load_ocr_reader()
@@ -546,58 +717,750 @@ class ConvertService:
         return max(PROCESS_TIMEOUT, page_count * OCR_TIMEOUT_PER_PAGE)
 
     @staticmethod
-    def _ocr_page_items(page, reader) -> list:
+    def _ocr_canvas_items(canvas, reader) -> list:
         """
-        Kenali isi satu halaman, lengkap dengan kotak dalam satuan titik PDF.
+        Kenali isi satu kanvas halaman, kotaknya dalam satuan titik.
 
-        Halaman dirender pada OCR_DPI lalu koordinat piksel dikembalikan ke
-        satuan halaman, sehingga kotaknya bisa langsung dipakai untuk menaruh
-        teks di posisi yang sama.
+        Koordinat piksel dikembalikan ke satuan halaman, sehingga kotaknya bisa
+        langsung dipakai untuk menaruh teks di posisi yang sama.
         """
-        pixmap = page.get_pixmap(dpi=OCR_DPI)
-        items = reader(pixmap.tobytes("png"))
+        items = reader(canvas.to_png())
 
-        scale = 72.0 / OCR_DPI
+        scale = 1.0 / canvas.scale
         for item in items:
             x0, y0, x1, y1 = item["bbox"]
             item["bbox"] = (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
         return items
 
     @staticmethod
-    def _ocr_page_lines(page, reader) -> list:
+    def _ocr_page_items(page, reader) -> list:
         """
-        Render satu halaman lalu kembalikan baris teks sesuai urutan baca.
+        Kenali isi satu halaman apa adanya, tanpa pelurusan citra.
 
-        Potongan yang tinggi tengahnya berdekatan digabung jadi satu baris,
-        supaya hasilnya terbaca sebagai kalimat, bukan serpihan lepas.
+        Dipakai fitur yang menempelkan hasilnya kembali ke halaman PDF asli,
+        jadi koordinatnya harus tetap berimpit dengan halaman itu.
         """
-        items = ConvertService._ocr_page_items(page, reader)
-        if not items:
-            return []
+        return ConvertService._ocr_canvas_items(PageCanvas(page), reader)
 
-        ordered = sorted(
-            items,
-            key=lambda item: ((item["bbox"][1] + item["bbox"][3]) / 2, item["bbox"][0]),
+    @staticmethod
+    def _page_image(page):
+        """Render satu halaman jadi citra BGR, atau None tanpa OpenCV/NumPy."""
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return None
+
+        pixmap = page.get_pixmap(dpi=OCR_DPI)
+        buffer = np.frombuffer(pixmap.samples, dtype=np.uint8)
+        image = buffer.reshape(pixmap.height, pixmap.stride)[:, : pixmap.width * pixmap.n]
+        image = image.reshape(pixmap.height, pixmap.width, pixmap.n)
+
+        if pixmap.n == 4:
+            return cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+        if pixmap.n == 3:
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        return cv2.cvtColor(image[:, :, 0], cv2.COLOR_GRAY2BGR)
+
+    @staticmethod
+    def _warp_document_quad(image):
+        """
+        Cari bidang kertas di dalam foto lalu luruskan perspektifnya.
+
+        Foto dokumen hampir selalu menyertakan meja atau tangan di sekelilingnya,
+        dan sisi kertasnya menjorok karena kamera tidak tegak lurus. Keduanya
+        membuat baris teks melengkung dan latarnya ikut terbaca sebagai gambar.
+        Kembalikan None kalau bidang kertasnya tidak ketemu meyakinkan, supaya
+        pindaian datar tidak ikut diubah-ubah.
+        """
+        import cv2
+        import numpy as np
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
+        ratio = PHOTO_EDGE_WORK_SIZE / max(height, width)
+        if ratio >= 1.0:
+            ratio = 1.0
+        small = cv2.resize(gray, None, fx=ratio, fy=ratio, interpolation=cv2.INTER_AREA)
+
+        edges = cv2.Canny(cv2.GaussianBlur(small, (5, 5), 0), 50, 150)
+        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8))
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        total_area = small.shape[0] * small.shape[1]
+        quad = None
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:6]:
+            area = cv2.contourArea(contour)
+            if not PHOTO_QUAD_MIN_AREA <= area / total_area <= PHOTO_QUAD_MAX_AREA:
+                continue
+            approx = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
+                continue
+            quad = approx.reshape(4, 2).astype(np.float32) / ratio
+            break
+
+        if quad is None:
+            return None
+
+        # Urutkan sudut: kiri atas, kanan atas, kanan bawah, kiri bawah
+        total = quad.sum(axis=1)
+        diagonal = np.diff(quad, axis=1).ravel()
+        corners = np.array(
+            [
+                quad[np.argmin(total)],
+                quad[np.argmin(diagonal)],
+                quad[np.argmax(total)],
+                quad[np.argmax(diagonal)],
+            ],
+            dtype=np.float32,
         )
 
-        lines: list = []
-        current: list = []
-        current_y = None
-        for item in ordered:
-            x0, y0, x1, y1 = item["bbox"]
-            center_y = (y0 + y1) / 2
-            height = max(y1 - y0, 1)
-            if current_y is not None and abs(center_y - current_y) > height * 0.6:
-                lines.append(" ".join(current))
-                current = []
-                current_y = None
-            current.append(item["text"])
-            if current_y is None:
-                current_y = center_y
+        def side(first, second) -> float:
+            return float(np.linalg.norm(corners[first] - corners[second]))
 
-        if current:
-            lines.append(" ".join(current))
+        target_width = max(side(0, 1), side(3, 2))
+        target_height = max(side(0, 3), side(1, 2))
+        if target_width < 200 or target_height < 200:
+            return None
+
+        target = np.array(
+            [
+                [0, 0],
+                [target_width - 1, 0],
+                [target_width - 1, target_height - 1],
+                [0, target_height - 1],
+            ],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(corners, target)
+        return cv2.warpPerspective(
+            image,
+            matrix,
+            (int(round(target_width)), int(round(target_height))),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+
+    @staticmethod
+    def _page_skew_angle(image) -> float:
+        """
+        Perkirakan kemiringan halaman dari arah baris teksnya.
+
+        Kata-kata disatukan dulu jadi gumpalan sepanjang baris, lalu sudut tiap
+        gumpalan panjang diambil dan dicari nilai tengahnya. Cara ini tahan
+        terhadap logo dan tanda tangan yang arahnya semrawut.
+        """
+        import cv2
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        ratio = PHOTO_SKEW_WORK_SIZE / max(gray.shape)
+        if ratio < 1.0:
+            gray = cv2.resize(gray, None, fx=ratio, fy=ratio, interpolation=cv2.INTER_AREA)
+
+        binary = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU
+        )[1]
+        blobs = cv2.dilate(binary, cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3)))
+        contours, _ = cv2.findContours(blobs, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        angles = []
+        for contour in contours:
+            (_, _), (box_width, box_height), angle = cv2.minAreaRect(contour)
+            if box_width < box_height:
+                box_width, box_height = box_height, box_width
+                angle += 90.0
+            angle = (angle + 45.0) % 90.0 - 45.0
+            if box_width < 40 or box_height < 2 or box_width / max(box_height, 1) < 5:
+                continue
+            if abs(angle) > DESKEW_MAX_ANGLE:
+                continue
+            angles.append(angle)
+
+        if len(angles) < 5:
+            return 0.0
+
+        angles.sort()
+        return angles[len(angles) // 2]
+
+    @staticmethod
+    def _rotate_image(image, angle: float):
+        """Putar citra sebesar sudut tertentu tanpa memotong sudut-sudutnya."""
+        import cv2
+
+        height, width = image.shape[:2]
+        matrix = cv2.getRotationMatrix2D((width / 2.0, height / 2.0), angle, 1.0)
+        cosine, sine = abs(matrix[0, 0]), abs(matrix[0, 1])
+        rotated_width = int(round(height * sine + width * cosine))
+        rotated_height = int(round(height * cosine + width * sine))
+        matrix[0, 2] += rotated_width / 2.0 - width / 2.0
+        matrix[1, 2] += rotated_height / 2.0 - height / 2.0
+        return cv2.warpAffine(
+            image,
+            matrix,
+            (rotated_width, rotated_height),
+            flags=cv2.INTER_CUBIC,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+
+    @staticmethod
+    def _flatten_illumination(image):
+        """
+        Ratakan cahaya halaman supaya kertasnya kembali putih.
+
+        Foto selalu punya sisi yang lebih gelap karena bayangan tangan atau
+        badan. Tanpa diratakan, ambang tinta menganggap seluruh sisi gelap itu
+        sebagai gambar, dan hasilnya DOCX penuh potongan bayangan. Kembalikan
+        None kalau cahayanya memang sudah rata.
+        """
+        import cv2
+        import numpy as np
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
+        small = cv2.resize(gray, (max(width // 12, 8), max(height // 12, 8)),
+                           interpolation=cv2.INTER_AREA)
+        background = cv2.medianBlur(small, 21)
+        spread = int(background.max()) - int(background.min())
+        if spread < PHOTO_SHADOW_SPREAD:
+            return None
+
+        background = cv2.resize(background, (width, height), interpolation=cv2.INTER_CUBIC)
+        background = np.maximum(background, 1).astype(np.float32)
+        # Pembagian dilakukan per kanal warna supaya stempel dan logo berwarna
+        # tidak ikut luntur jadi abu-abu
+        flattened = image.astype(np.float32) * (255.0 / background[:, :, None])
+        return np.clip(flattened, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _points_per_pixel(image) -> float:
+        """
+        Tentukan berapa titik halaman yang diwakili satu piksel bidang kertas.
+
+        Dipakai setelah perspektif diluruskan: kotak halaman PDF-nya seukuran
+        bidang foto, bukan seukuran kertasnya, jadi skala aslinya tidak lagi
+        berlaku. Kertas dianggap selebar A4 supaya ukuran huruf di Word masuk
+        akal, sedangkan tingginya mengikuti perbandingan citra apa adanya.
+        """
+        height, width = image.shape[:2]
+        if height >= width:
+            return 595.0 / max(width, 1)
+        return 842.0 / max(width, 1)
+
+    @staticmethod
+    def _build_page_canvas(page, normalize: bool) -> "PageCanvas":
+        """
+        Siapkan kanvas halaman, sekalian dibereskan kalau berasal dari foto.
+
+        Citranya selalu dibuat karena deteksi logo dan tanda tangan memerlukannya.
+        Pelurusan geometrinya yang dibatasi: hanya untuk halaman hasil foto, sebab
+        PDF pindaian yang sudah punya lapisan teks memakai koordinat halaman
+        aslinya, dan citra yang diputar tidak lagi berimpit dengan koordinat itu.
+        """
+        image = ConvertService._page_image(page)
+        if image is None:
+            return PageCanvas(page)
+        if not normalize:
+            return PageCanvas(page, image)
+
+        # Rotasi hanya memperbesar bidang citra, tidak mengubah ukuran fisik
+        # kertasnya, jadi skala awalnya tetap dipakai selama perspektifnya tidak
+        # ikut diluruskan.
+        points_per_pixel = 72.0 / OCR_DPI
+        try:
+            warped = ConvertService._warp_document_quad(image)
+            if warped is not None:
+                image = warped
+                points_per_pixel = ConvertService._points_per_pixel(image)
+                logger.info("Bidang kertas pada foto ditemukan dan diluruskan")
+
+            angle = ConvertService._page_skew_angle(image)
+            if abs(angle) >= DESKEW_MIN_ANGLE:
+                height, width = image.shape[:2]
+                rotated = ConvertService._rotate_image(image, angle)
+                # Memutar citra memperbesar bidangnya, padahal kertasnya tidak
+                # ikut membesar; bidangnya dikembalikan ke ukuran semula supaya
+                # halaman Word-nya tidak jadi lebih besar daripada kertas asli
+                top = max((rotated.shape[0] - height) // 2, 0)
+                left = max((rotated.shape[1] - width) // 2, 0)
+                image = rotated[top:top + height, left:left + width]
+                logger.info(f"Halaman dimiringkan balik {angle:.1f} derajat")
+
+            flattened = ConvertService._flatten_illumination(image)
+            if flattened is not None:
+                image = flattened
+                logger.info("Cahaya halaman diratakan")
+        except Exception:
+            logger.warning("Pembersihan citra halaman gagal, dipakai apa adanya", exc_info=True)
+            return PageCanvas(page)
+
+        height, width = image.shape[:2]
+        return PageCanvas(
+            page, image, width * points_per_pixel, height * points_per_pixel
+        )
+
+    @staticmethod
+    def _group_items_into_lines(items: list) -> list:
+        """
+        Kelompokkan potongan teks menjadi baris sesuai urutan baca.
+
+        Penggabungan memakai tumpang tindih vertikal, bukan jarak titik tengah:
+        pada kop surat ukuran huruf antarpotongan bisa jauh berbeda, sehingga
+        patokan titik tengah memecah satu baris menjadi beberapa potongan lepas.
+        """
+        boxed = [item for item in items if item.get("text", "").strip()]
+        if not boxed:
+            return []
+
+        lines: list = []
+        for item in sorted(boxed, key=lambda entry: (entry["bbox"][1], entry["bbox"][0])):
+            _, y0, _, y1 = item["bbox"]
+            height = max(y1 - y0, 0.01)
+            for line in lines:
+                line_height = max(line["bottom"] - line["top"], 0.01)
+                overlap = min(y1, line["bottom"]) - max(y0, line["top"])
+                shortest = max(min(height, line_height), 0.01)
+                ratio = height / line_height
+                # Kotak yang jauh lebih tinggi (logo yang terbaca sebagai satu
+                # huruf, misalnya) tidak boleh menarik baris-baris di sebelahnya
+                # menjadi satu paragraf
+                if overlap >= shortest * 0.45 and 0.45 <= ratio <= 2.2:
+                    line["items"].append(item)
+                    line["top"] = min(line["top"], y0)
+                    line["bottom"] = max(line["bottom"], y1)
+                    break
+            else:
+                lines.append({"items": [item], "top": y0, "bottom": y1})
+
+        for line in lines:
+            line["items"].sort(key=lambda entry: entry["bbox"][0])
+            line["left"] = min(entry["bbox"][0] for entry in line["items"])
+            line["right"] = max(entry["bbox"][2] for entry in line["items"])
+            heights = sorted(
+                entry["bbox"][3] - entry["bbox"][1] for entry in line["items"]
+            )
+            line["height"] = heights[len(heights) // 2] or 1.0
+
+        lines.sort(key=lambda line: (line["top"], line["left"]))
         return lines
+
+    @staticmethod
+    def _drop_graphic_like_items(items: list) -> list:
+        """
+        Buang potongan OCR yang sebenarnya gambar, bukan tulisan.
+
+        Logo bundar dan stempel kerap dikenali sebagai satu huruf di dalam kotak
+        setinggi beberapa baris. Kalau dibiarkan, isinya jadi huruf nyasar di
+        tengah kop surat sekaligus menghapus gambarnya dari pencarian gambar
+        halaman, karena area teks memang sengaja dikosongkan di sana.
+        """
+        heights = sorted(item["bbox"][3] - item["bbox"][1] for item in items)
+        if len(heights) < 5:
+            return items
+
+        median = heights[len(heights) // 2]
+        if median <= 0:
+            return items
+
+        kept = []
+        for item in items:
+            height = item["bbox"][3] - item["bbox"][1]
+            if height > median * 2.5 and len(item["text"].strip()) <= 2:
+                continue
+            kept.append(item)
+        return kept
+
+    @staticmethod
+    def _line_segments(line: dict):
+        """
+        Hasilkan pasangan (pemisah, potongan) untuk satu baris.
+
+        Jarak antarpotongan yang lebar diterjemahkan jadi tab supaya susunan
+        berkolom seperti nomor dan tanggal surat tidak menempel jadi satu.
+        """
+        previous_right = None
+        previous_text = ""
+        for item in line["items"]:
+            text = item.get("text", "")
+            if not text.strip():
+                continue
+
+            separator = ""
+            if previous_right is not None:
+                gap = item["bbox"][0] - previous_right
+                # Span PDF bisa terpotong di tengah kata, jadi jarak nol berarti
+                # masih satu kata; kotak OCR selalu utuh per kata atau frasa.
+                tight = item.get("size") is not None
+                if gap > line["height"] * 1.2:
+                    separator = "\t"
+                elif gap > line["height"] * 0.12 or not tight:
+                    separator = " "
+                if separator == " " and (
+                    previous_text.endswith(" ") or text.startswith(" ")
+                ):
+                    separator = ""
+
+            yield separator, item
+            previous_right = item["bbox"][2]
+            previous_text = text
+
+    @staticmethod
+    def _line_text(line: dict) -> str:
+        """Rangkai satu baris jadi teks biasa."""
+        parts = []
+        for separator, item in ConvertService._line_segments(line):
+            parts.append(separator)
+            parts.append(item["text"])
+        return "".join(parts).strip()
+
+    @staticmethod
+    def _normalize_ocr_line_heights(lines: list) -> None:
+        """
+        Seragamkan tinggi baris hasil OCR supaya ukuran hurufnya tidak lompat-lompat.
+
+        Kotak OCR mengikuti bentuk tulisannya: baris tanpa huruf turun seperti
+        "j" atau "p" terbaca lebih pendek walau ukurannya sama. Tanpa penyetaraan
+        ini satu paragraf bisa berisi tiga ukuran huruf berbeda dan terlihat
+        berantakan, padahal aslinya seragam.
+        """
+        measured = []
+        for line in lines:
+            if any(item.get("size") for item in line["items"]):
+                continue
+            text = ConvertService._line_text(line)
+            # Baris kapital semua tidak punya huruf turun, jadi kotaknya lebih
+            # pendek daripada ukuran huruf sebenarnya
+            if text and not any(character.islower() for character in text):
+                line["height"] *= 1.22
+            measured.append(line)
+
+        if len(measured) < 3:
+            return
+
+        heights = sorted(line["height"] for line in measured)
+        median = heights[len(heights) // 2]
+        if median <= 0:
+            return
+
+        for line in measured:
+            if 0.85 <= line["height"] / median <= 1.18:
+                line["height"] = median
+
+    @staticmethod
+    def _font_size_pt(item: dict, line_height: float) -> float:
+        """
+        Tentukan ukuran huruf sebuah potongan teks.
+
+        Span PDF membawa ukuran aslinya; hasil OCR tidak, jadi ukurannya
+        diperkirakan dari tinggi kotak pengenalan.
+        """
+        size = item.get("size") or line_height * OCR_FONT_HEIGHT_RATIO
+        return max(6.0, min(36.0, round(float(size) * 2) / 2))
+
+    @staticmethod
+    def _detect_graphic_regions(canvas, text_boxes: list) -> list:
+        """
+        Cari bagian halaman yang berisi gambar, bukan teks.
+
+        Pada PDF hasil pindaian, logo kop surat, tanda tangan, dan stempel
+        menyatu dengan citra halaman sehingga tidak bisa diambil sebagai objek
+        gambar. Karena itu halaman dirender, area yang sudah dikenali sebagai
+        teks dihapus, lalu sisa tintanya dikelompokkan jadi kotak-kotak gambar.
+        """
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            logger.debug("OpenCV/NumPy tidak tersedia, gambar halaman dilewati")
+            return []
+
+        image = canvas.gray()
+        if image is None:
+            return []
+
+        scale = canvas.scale
+        shrink = GRAPHIC_DPI / (scale * 72.0)
+        if shrink < 1.0:
+            image = cv2.resize(image, None, fx=shrink, fy=shrink, interpolation=cv2.INTER_AREA)
+            scale *= shrink
+
+        height, width = image.shape
+        # Ambang tinta dihitung dari sebaran terang halaman itu sendiri: pada
+        # foto, kertas jarang benar-benar putih sehingga ambang tetap membuat
+        # separuh halaman terbaca sebagai tinta.
+        otsu, _ = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        threshold_value = max(90, min(int(otsu), GRAPHIC_INK_THRESHOLD))
+        ink = (image < threshold_value).astype(np.uint8)
+
+        pad = max(1, int(round(2 * scale)))
+        for x0, y0, x1, y1 in text_boxes:
+            left = max(int(x0 * scale) - pad, 0)
+            top = max(int(y0 * scale) - pad, 0)
+            right = min(int(x1 * scale) + pad + 1, width)
+            bottom = min(int(y1 * scale) + pad + 1, height)
+            if right > left and bottom > top:
+                ink[top:bottom, left:right] = 0
+
+        # Bingkai gelap di tepi kertas adalah bayangan pemindai, bukan isi surat
+        border = max(1, int(round(6 * scale)))
+        ink[:border, :] = 0
+        ink[height - border:, :] = 0
+        ink[:, :border] = 0
+        ink[:, width - border:] = 0
+
+        # Goresan tanda tangan terputus-putus; ditutup dulu supaya jadi satu objek
+        kernel_size = max(3, int(round(5 * scale)))
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        merged = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, kernel)
+
+        count, _, stats, _ = cv2.connectedComponentsWithStats(merged, 8)
+        page_area = max(width * height, 1)
+        minimum_pixels = GRAPHIC_MIN_AREA_PT * scale * scale
+
+        regions = []
+        for index in range(1, count):
+            x, y, box_width, box_height, area = (
+                int(value) for value in stats[index][:5]
+            )
+            if area < minimum_pixels:
+                continue
+
+            width_pt = box_width / scale
+            height_pt = box_height / scale
+            # Garis pemisah kop surat panjang tapi tipis, jadi diloloskan terpisah
+            rule_line = width_pt >= 48 and height_pt >= 1.5
+            if (width_pt < 12 or height_pt < 12) and not rule_line:
+                continue
+            box_area = max(box_width * box_height, 1)
+            covers_page = box_width >= width * 0.85 and box_height >= height * 0.85
+            if covers_page or box_area / page_area > 0.8:
+                # Sekujur halaman: citra pindaiannya sendiri, bukan satu gambar
+                continue
+            if area / box_area < 0.02:
+                continue
+
+            regions.append(
+                (
+                    x / scale,
+                    y / scale,
+                    (x + box_width) / scale,
+                    (y + box_height) / scale,
+                )
+            )
+
+        regions.sort(key=lambda region: (region[1], region[0]))
+        return regions[:GRAPHIC_MAX_REGIONS]
+
+    @staticmethod
+    def _page_margins(canvas, lines: list, graphics: list) -> tuple:
+        """
+        Perkirakan margin halaman dari sebaran isinya.
+
+        Margin ini yang jadi acuan rata kiri/tengah/kanan dan indentasi, jadi
+        posisi tiap baris di Word mengikuti posisinya di dokumen asli.
+        """
+        lefts = [line["left"] for line in lines] + [region[0] for region in graphics]
+        rights = [line["right"] for line in lines] + [region[2] for region in graphics]
+        tops = [line["top"] for line in lines] + [region[1] for region in graphics]
+        bottoms = [line["bottom"] for line in lines] + [region[3] for region in graphics]
+
+        def clamp(value: float) -> float:
+            return max(18.0, min(108.0, float(value)))
+
+        if not lefts:
+            return 72.0, 72.0, 72.0, 72.0
+
+        return (
+            clamp(min(lefts)),
+            clamp(canvas.width_pt - max(rights)),
+            clamp(min(tops)),
+            clamp(canvas.height_pt - max(bottoms)),
+        )
+
+    @staticmethod
+    def _apply_block_position(
+        paragraph, left: float, right: float, margins: tuple, page_width: float
+    ) -> None:
+        """Tentukan rata teks dan indentasi sebuah blok dari posisinya di halaman."""
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
+
+        margin_left, margin_right = margins[0], margins[1]
+        content_right = page_width - margin_right
+        content_width = max(content_right - margin_left, 1.0)
+        tolerance = max(12.0, content_width * 0.03)
+        indent = left - margin_left
+        block_center = (left + right) / 2
+        content_center = (margin_left + content_right) / 2
+
+        if abs(block_center - content_center) <= tolerance and indent > 24:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif right >= content_right - tolerance and indent > 72:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            if indent > 4:
+                paragraph.paragraph_format.left_indent = Pt(
+                    min(indent, max(content_width - 40, 0))
+                )
+
+    @staticmethod
+    def _append_layout_page(
+        docx_document, canvas, lines: list, graphics: list, margins: tuple
+    ) -> None:
+        """Tulis satu halaman ke DOCX dengan urutan, posisi, dan gambarnya."""
+        from docx.shared import Pt
+
+        blocks = [("text", line["top"], line["bottom"], line) for line in lines]
+        blocks += [("image", region[1], region[3], region) for region in graphics]
+        blocks.sort(
+            key=lambda block: (
+                block[1],
+                block[3][0] if block[0] == "image" else block[3]["left"],
+            )
+        )
+
+        page_width = canvas.width_pt
+        content_width = max(page_width - margins[0] - margins[1], 1.0)
+        previous_bottom = None
+
+        for kind, top, bottom, payload in blocks:
+            paragraph = docx_document.add_paragraph()
+            spacing = paragraph.paragraph_format
+            spacing.space_after = Pt(0)
+            spacing.line_spacing = 1.0
+            gap = 0.0 if previous_bottom is None else top - previous_bottom
+            spacing.space_before = Pt(max(0.0, min(gap, 72.0)))
+
+            if kind == "image":
+                image_bytes = canvas.crop_png(payload)
+                if image_bytes is None:
+                    continue
+                left, _, right, _ = payload
+                ConvertService._apply_block_position(
+                    paragraph, left, right, margins, page_width
+                )
+                run = paragraph.add_run()
+                try:
+                    run.add_picture(
+                        io.BytesIO(image_bytes),
+                        width=Pt(min(right - left + 4.0, content_width)),
+                    )
+                except Exception:
+                    logger.debug("Gambar halaman gagal disisipkan", exc_info=True)
+            else:
+                ConvertService._apply_block_position(
+                    paragraph, payload["left"], payload["right"], margins, page_width
+                )
+                for separator, item in ConvertService._line_segments(payload):
+                    if separator:
+                        paragraph.add_run(separator)
+                    run = paragraph.add_run(item["text"])
+                    run.font.size = Pt(
+                        ConvertService._font_size_pt(item, payload["height"])
+                    )
+                    flags = item.get("flags")
+                    if flags is not None:
+                        run.bold = bool(flags & 2 ** 4)
+                        run.italic = bool(flags & 2 ** 1)
+
+            previous_bottom = bottom
+
+    @staticmethod
+    def _build_layout_docx(
+        input_path: str,
+        output_path: str,
+        item_source: Callable,
+        progress: Optional[Callable] = None,
+        normalize: bool = False,
+    ) -> None:
+        """
+        Susun DOCX yang meniru tata letak PDF, lengkap dengan gambarnya.
+
+        Dipakai untuk PDF hasil pindaian: teksnya bisa datang dari OCR atau dari
+        lapisan teks tak terlihat, sedangkan logo kop surat, tanda tangan, dan
+        stempel diambil sebagai potongan gambar halaman. Tanpa ini keluarannya
+        cuma tumpukan paragraf rata kiri tanpa satu gambar pun.
+        """
+        fitz = ConvertService._import_fitz()
+        from docx import Document
+        from docx.shared import Pt
+
+        document = fitz.open(input_path)
+        docx_document = Document()
+        margins = None
+        try:
+            total_pages = document.page_count
+            for page_index, page in enumerate(document):
+                canvas = ConvertService._build_page_canvas(page, normalize)
+                items = ConvertService._drop_graphic_like_items(item_source(canvas))
+                lines = ConvertService._group_items_into_lines(items)
+                ConvertService._normalize_ocr_line_heights(lines)
+                graphics = ConvertService._detect_graphic_regions(
+                    canvas, [item["bbox"] for item in items]
+                )
+
+                if margins is None:
+                    margins = ConvertService._page_margins(canvas, lines, graphics)
+                    section = docx_document.sections[0]
+                    section.page_width = Pt(canvas.width_pt)
+                    section.page_height = Pt(canvas.height_pt)
+                    section.left_margin = Pt(margins[0])
+                    section.right_margin = Pt(margins[1])
+                    section.top_margin = Pt(margins[2])
+                    section.bottom_margin = Pt(margins[3])
+                else:
+                    docx_document.add_page_break()
+
+                ConvertService._append_layout_page(
+                    docx_document, canvas, lines, graphics, margins
+                )
+                ConvertService._report_progress(progress, page_index + 1, total_pages)
+
+            docx_document.save(output_path)
+        finally:
+            document.close()
+
+    @staticmethod
+    def _pdf_text_items(canvas) -> list:
+        """Ambil span teks halaman lengkap dengan kotak, ukuran, dan gayanya."""
+        items = []
+        for block in canvas.page.get_text("dict").get("blocks", []):
+            if block.get("type") != 0:  # 0 = blok teks
+                continue
+            for line in block.get("lines") or ():
+                for span in line.get("spans") or ():
+                    text = span.get("text", "")
+                    bbox = span.get("bbox")
+                    if not text.strip() or not bbox:
+                        continue
+                    items.append(
+                        {
+                            "text": text,
+                            "bbox": tuple(bbox),
+                            "size": span.get("size"),
+                            "flags": span.get("flags", 0),
+                        }
+                    )
+        return items
+
+    @staticmethod
+    def _ocr_page_lines(page, reader) -> list:
+        """
+        Kenali satu halaman lalu kembalikan barisnya sebagai teks biasa.
+
+        Halamannya diluruskan lebih dulu karena keluarannya hanya teks: pada
+        foto yang miring, baris kiri dan kanan berbeda tinggi sehingga tanpa
+        pelurusan potongan dari dua baris bisa tercampur jadi satu kalimat.
+        """
+        canvas = ConvertService._build_page_canvas(page, True)
+        lines = ConvertService._group_items_into_lines(
+            ConvertService._drop_graphic_like_items(
+                ConvertService._ocr_canvas_items(canvas, reader)
+            )
+        )
+        return [
+            text for text in (ConvertService._line_text(line) for line in lines) if text
+        ]
 
     @staticmethod
     def _ocr_pdf_to_docx(
@@ -610,26 +1473,13 @@ class ConvertService:
         cara menghasilkan Word yang bisa diedit adalah membaca gambar halamannya.
         """
         reader = ConvertService._require_ocr_reader()
-
-        fitz = ConvertService._import_fitz()
-        from docx import Document
-
-        document = fitz.open(input_path)
-        docx_document = Document()
-        try:
-            total_pages = document.page_count
-            for page_index, page in enumerate(document):
-                if page_index:
-                    docx_document.add_page_break()
-
-                for line in ConvertService._ocr_page_lines(page, reader):
-                    docx_document.add_paragraph(line)
-
-                ConvertService._report_progress(progress, page_index + 1, total_pages)
-
-            docx_document.save(output_path)
-        finally:
-            document.close()
+        ConvertService._build_layout_docx(
+            input_path,
+            output_path,
+            lambda canvas: ConvertService._ocr_canvas_items(canvas, reader),
+            progress,
+            normalize=True,
+        )
 
     @staticmethod
     def _report_progress(progress: Optional[Callable], done: int, total: int) -> None:
@@ -694,12 +1544,38 @@ class ConvertService:
                 ConvertService._ocr_pdf_to_docx(input_path, output_path, progress)
                 return
 
-            # Teks tersembunyi mendominasi berarti PDF pindaian yang sudah di-OCR:
-            # pdf2docx harus diminta membaca lapisan itu (ocr=2), kalau tidak yang
-            # tersisa hanya gambar halaman.
+            minimum_chars = max(1, int(stats["chars"] * PDF_DOCX_TEXT_RATIO))
+
+            # Teks tersembunyi mendominasi berarti PDF pindaian yang sudah di-OCR.
+            # pdf2docx cuma bisa membaca satu lapisan: dengan ocr=2 teksnya dapat
+            # tapi kop surat, tanda tangan, dan stempel hilang; dengan ocr=0 yang
+            # tersisa cuma gambar halaman. Karena itu dokumen semacam ini disusun
+            # sendiri dari span teks PDF plus potongan gambar halamannya.
+            if stats["hidden_ratio"] >= PDF_HIDDEN_TEXT_RATIO:
+                logger.info(
+                    "PDF pindaian dengan lapisan teks OCR, disusun ulang beserta "
+                    "gambar halamannya"
+                )
+                try:
+                    ConvertService._build_layout_docx(
+                        input_path,
+                        output_path,
+                        ConvertService._pdf_text_items,
+                        progress,
+                    )
+                except Exception as e:
+                    logger.warning(f"Penyusunan ulang tata letak gagal: {e}")
+                else:
+                    extracted = ConvertService._docx_text_length(output_path)
+                    if extracted < 0 or extracted >= minimum_chars:
+                        return
+                    logger.warning(
+                        f"DOCX tata letak cuma berisi {extracted} karakter "
+                        f"(PDF punya {stats['chars']}), coba pdf2docx"
+                    )
+
             primary_mode = 2 if stats["hidden_ratio"] >= PDF_HIDDEN_TEXT_RATIO else 0
             modes = [primary_mode, 0 if primary_mode == 2 else 2]
-            minimum_chars = max(1, int(stats["chars"] * PDF_DOCX_TEXT_RATIO))
 
             for mode in modes:
                 try:
