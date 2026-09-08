@@ -50,9 +50,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className="overflow-x-clip">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground transition-colors duration-200`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-clip bg-background text-foreground transition-colors duration-200`}
       >
         <ThemeProvider>
           <Navbar />

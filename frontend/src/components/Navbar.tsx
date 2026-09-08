@@ -72,8 +72,8 @@ export default function Navbar() {
     getToolsByCategory(categoryId).some((tool) => isActive(tool.href));
 
   return (
-    <nav className="sticky top-0 z-50 w-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/70 dark:border-slate-700/70">
-      <div className="max-w-[1440px] mx-auto px-4">
+    <nav className="sticky top-0 z-50 w-full overflow-x-clip bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200/70 dark:border-slate-700/70">
+      <div ref={megaRef} className="relative max-w-[1440px] mx-auto px-4">
         <div className="flex items-center h-20 gap-3">
           <Link href="/" className="flex items-center gap-3 group flex-shrink-0">
             <div className="relative w-9 h-9 transition-transform group-hover:scale-105">
@@ -97,7 +97,7 @@ export default function Navbar() {
           </Link>
 
           {/* Desktop nav */}
-          <div ref={megaRef} className="hidden lg:flex flex-1 items-center gap-1 min-w-0">
+          <div className="hidden lg:flex flex-1 items-center gap-1 min-w-0">
             {topLinks.map((tool) => {
               const Icon = tool.icon;
               const active = isActive(tool.href);
@@ -123,7 +123,7 @@ export default function Navbar() {
               );
             })}
 
-            <div className="relative ml-1">
+            <div className="ml-1">
               <button
                 type="button"
                 onClick={() =>
@@ -145,71 +145,6 @@ export default function Navbar() {
                   className={`transition-transform ${openDesktopCategory ? "rotate-180" : ""}`}
                 />
               </button>
-
-              {openDesktopCategory && (
-                <div className="absolute left-0 top-full mt-2 w-[min(920px,calc(100vw-2rem))] rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/10 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                  <div className="grid grid-cols-[200px_1fr]">
-                    <div className="bg-slate-50 dark:bg-slate-800/60 border-r border-slate-200 dark:border-slate-700 p-3 space-y-1">
-                      {TOOL_CATEGORIES.map((category) => {
-                        const selected = openDesktopCategory === category.id;
-                        return (
-                          <button
-                            key={category.id}
-                            type="button"
-                            onMouseEnter={() => setOpenDesktopCategory(category.id)}
-                            onClick={() => setOpenDesktopCategory(category.id)}
-                            className={`
-                              w-full text-left px-3 py-2.5 rounded-xl transition-colors
-                              ${selected
-                                ? "bg-white dark:bg-slate-900 shadow-sm text-blue-700 dark:text-blue-300"
-                                : "text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-900/50"
-                              }
-                            `}
-                          >
-                            <div className="text-sm font-bold">{category.label}</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
-                              {category.description}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="p-4 max-h-[420px] overflow-y-auto custom-scrollbar">
-                      <div className="grid grid-cols-2 xl:grid-cols-3 gap-1.5">
-                        {getToolsByCategory(openDesktopCategory).map((tool) => {
-                          const Icon = tool.icon;
-                          const active = isActive(tool.href);
-                          return (
-                            <Link
-                              key={tool.href}
-                              href={tool.href}
-                              onClick={() => setOpenDesktopCategory(null)}
-                              className={`
-                                flex items-start gap-3 px-3 py-2.5 rounded-xl transition-colors
-                                ${active
-                                  ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                                  : "hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
-                                }
-                              `}
-                            >
-                              <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tool.bg}`}>
-                                <Icon size={16} className={tool.color} />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-sm font-bold truncate">{tool.name}</div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug">
-                                  {tool.desc}
-                                </div>
-                              </div>
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -251,6 +186,70 @@ export default function Navbar() {
             </button>
           </div>
         </div>
+
+        {openDesktopCategory && (
+          <div className="hidden lg:block absolute left-4 right-4 top-full z-50 mt-2 max-w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/10 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="grid grid-cols-[minmax(0,190px)_minmax(0,1fr)] min-w-0">
+              <div className="bg-slate-50 dark:bg-slate-800/60 border-r border-slate-200 dark:border-slate-700 p-3 space-y-1 min-w-0">
+                {TOOL_CATEGORIES.map((category) => {
+                  const selected = openDesktopCategory === category.id;
+                  return (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setOpenDesktopCategory(category.id)}
+                      className={`
+                        w-full text-left px-3 py-2.5 rounded-xl transition-colors
+                        ${selected
+                          ? "bg-white dark:bg-slate-900 shadow-sm text-blue-700 dark:text-blue-300"
+                          : "text-slate-600 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-slate-900/50"
+                        }
+                      `}
+                    >
+                      <div className="text-sm font-bold">{category.label}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                        {category.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="p-4 max-h-[min(420px,70vh)] overflow-y-auto overflow-x-hidden custom-scrollbar min-w-0">
+                <div className="grid grid-cols-2 xl:grid-cols-3 gap-1.5">
+                  {getToolsByCategory(openDesktopCategory).map((tool) => {
+                    const Icon = tool.icon;
+                    const active = isActive(tool.href);
+                    return (
+                      <Link
+                        key={tool.href}
+                        href={tool.href}
+                        onClick={() => setOpenDesktopCategory(null)}
+                        className={`
+                          flex items-start gap-3 px-3 py-2.5 rounded-xl transition-colors min-w-0
+                          ${active
+                            ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                            : "hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
+                          }
+                        `}
+                      >
+                        <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tool.bg}`}>
+                          <Icon size={16} className={tool.color} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold truncate">{tool.name}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-snug">
+                            {tool.desc}
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Mobile / tablet menu */}
         {isMobileMenuOpen && (
