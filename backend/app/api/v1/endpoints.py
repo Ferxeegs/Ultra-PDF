@@ -14,7 +14,6 @@ from fastapi import (
     Request,
 )
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 from app.services.pdf_service import PDFService
 from app.services.image_service import ImageService
 from app.utils.security import (
@@ -24,7 +23,7 @@ from app.utils.security import (
     sanitize_filename,
     get_safe_file_path,
 )
-from app.middleware.rate_limit import limiter
+from app.middleware.rate_limit import limiter, RATE_LIMIT_EXPENSIVE, RATE_LIMIT_STANDARD
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +33,6 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs")
 
 ALLOWED_QUALITIES = ["low", "medium", "high"]
-
-
-class QualityInput(BaseModel):
-    quality: str = Field(default="medium", pattern="^(low|medium|high)$")
 
 
 def remove_file(path: str):
@@ -60,7 +55,7 @@ def remove_directory(path: str):
 
 
 @router.post("/compress")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def compress_pdf(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -151,7 +146,7 @@ async def compress_pdf(
 
 
 @router.post("/convert-docx")
-@limiter.limit("5/minute")
+@limiter.limit(RATE_LIMIT_EXPENSIVE)
 async def convert_docx_to_pdf_endpoint(
     request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)
 ):
@@ -218,7 +213,7 @@ async def convert_docx_to_pdf_endpoint(
 
 
 @router.post("/convert-ppt")
-@limiter.limit("5/minute")
+@limiter.limit(RATE_LIMIT_EXPENSIVE)
 async def convert_ppt_to_pdf_endpoint(
     request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)
 ):
@@ -285,7 +280,7 @@ async def convert_ppt_to_pdf_endpoint(
 
 
 @router.post("/convert-image")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def convert_image_to_pdf_endpoint(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -363,7 +358,7 @@ async def convert_image_to_pdf_endpoint(
 
 
 @router.post("/remove-bg")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STANDARD)
 async def remove_image_background(
     request: Request,
     background_tasks: BackgroundTasks,

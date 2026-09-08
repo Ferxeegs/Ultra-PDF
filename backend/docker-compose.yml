@@ -3,10 +3,13 @@ services:
     build: .
     container_name: ultrapdf-backend
     volumes:
-      - .:/app
+      # Hanya direktori data yang di-mount. Dulu ada juga "- .:/app" dan
+      # "- ./.u2net:/app/.u2net": keduanya menimpa isi image, sehingga .venv
+      # hasil build dan model rembg 176MB yang sudah diunduh saat build jadi
+      # tidak terlihat - request remove-bg pertama harus mengunduh ulang model
+      # (~70 detik), atau gagal total kalau kontainer tanpa internet.
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
-      - ./.u2net:/app/.u2net
     # Port 8000:8000 opsional jika sudah pakai Nginx, 
     # tapi boleh tetap ada untuk akses langsung via IP:8000
     ports:
@@ -15,7 +18,7 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     environment:
-      - ENV=development
+      - ENV=production
       - PORT=8000
       - REMBG_MODEL_NAME=bria-rmbg-1.4
       - REMBG_MAX_SIDE=2560
@@ -23,7 +26,9 @@ services:
       - REMBG_MASK_REFINE=1
       - REMBG_DECONTAMINATE=1
       - REMBG_HALO_SUPPRESS=1
-    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300 --timeout-graceful-shutdown 30
+    # --reload dilepas: ia hanya berguna kalau kode di-mount dari host, dan
+    # menambah proses watcher yang tidak diperlukan di layanan restart: always
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 300 --timeout-graceful-shutdown 30
     restart: always
     networks:
       - app-bridge

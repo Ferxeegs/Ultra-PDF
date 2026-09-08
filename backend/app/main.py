@@ -6,6 +6,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1.endpoints import router as api_router
 from app.api.v1.convert import router as convert_router
 from app.api.v1.security import router as security_router
+from app.api.v1.tools import router as tools_router
 from app.middleware.security import SecurityHeadersMiddleware
 from app.middleware.rate_limit import get_rate_limiter
 from slowapi.errors import RateLimitExceeded
@@ -135,6 +136,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(convert_router, prefix="/api/v1/convert", tags=["convert"])
 app.include_router(security_router, prefix="/api/v1/security", tags=["security"])
+app.include_router(tools_router, prefix="/api/v1/tools", tags=["tools"])
 
 @app.get("/")
 async def root():

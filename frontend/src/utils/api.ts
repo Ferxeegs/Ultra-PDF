@@ -22,6 +22,22 @@ export const API_ENDPOINTS = {
   securityInspect: `${API_BASE_URL}/api/v1/security/inspect`,
   securityUnlock: `${API_BASE_URL}/api/v1/security/unlock`,
   securityProtect: `${API_BASE_URL}/api/v1/security/protect`,
+
+  // Endpoint perkakas PDF: menyunting PDF-nya sendiri, bukan mengubah formatnya
+  toolsOptions: `${API_BASE_URL}/api/v1/tools/options`,
+  toolsOcr: `${API_BASE_URL}/api/v1/tools/ocr`,
+  toolsWatermark: `${API_BASE_URL}/api/v1/tools/watermark`,
+  toolsPageNumbers: `${API_BASE_URL}/api/v1/tools/page-numbers`,
+  toolsCrop: `${API_BASE_URL}/api/v1/tools/crop`,
+  toolsCompare: `${API_BASE_URL}/api/v1/tools/compare`,
+  toolsRepair: `${API_BASE_URL}/api/v1/tools/repair`,
+  toolsRotate: `${API_BASE_URL}/api/v1/tools/rotate`,
+  toolsRemovePages: `${API_BASE_URL}/api/v1/tools/remove-pages`,
+  toolsExtractPages: `${API_BASE_URL}/api/v1/tools/extract-pages`,
+  toolsRedact: `${API_BASE_URL}/api/v1/tools/redact`,
+  toolsEdit: `${API_BASE_URL}/api/v1/tools/edit`,
+  toolsFormFields: `${API_BASE_URL}/api/v1/tools/form-fields`,
+  toolsFillForm: `${API_BASE_URL}/api/v1/tools/fill-form`,
 } as const;
 
 /** URL status satu job konversi async */
@@ -48,17 +64,3 @@ export interface ConvertJob {
 
 // Tipe data untuk kualitas kompresi
 export type CompressionQuality = 'low' | 'medium' | 'high';
-
-/**
- * Memetakan level kompresi (0-1) ke string kualitas yang dikenali oleh backend
- * @param level - Angka antara 0 hingga 1
- */
-export function mapCompressionLevelToQuality(level: number): 'low' | 'medium' | 'high' {
-  if (level <= 0.5) {
-    return 'low';
-  } else if (level <= 0.7) {
-    return 'medium';
-  } else {
-    return 'high';
-  }
-}

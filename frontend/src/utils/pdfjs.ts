@@ -86,15 +86,6 @@ export function clearPdfDocument(fileId: string): void {
   delete pdfDocCache[fileId];
 }
 
-/**
- * Clear all PDF documents from cache
- */
-export function clearAllPdfDocuments(): void {
-  Object.keys(pdfDocInstances).forEach(fileId => {
-    clearPdfDocument(fileId);
-  });
-}
-
 // Export function to get pdfjsLib (lazy loaded) - for external use
 export async function getPdfjsLibExport() {
   return await getPdfjsLib();

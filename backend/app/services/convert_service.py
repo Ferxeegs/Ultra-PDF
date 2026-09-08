@@ -13,11 +13,12 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from app.services.pdf_service import PDFService
 
@@ -29,6 +30,22 @@ LIBREOFFICE_PROFILE_ROOT = os.getenv(
     "LIBREOFFICE_PROFILE_ROOT",
     os.path.join(tempfile.gettempdir(), "ultrapdf_lo_profiles"),
 )
+
+# Ambang deteksi lapisan teks PDF, dipakai saat konversi PDF ke Word.
+# Di bawah PDF_MIN_CHARS_PER_PAGE halaman dianggap hasil pindaian murni; di atas
+# PDF_HIDDEN_TEXT_RATIO teksnya dianggap lapisan OCR tak terlihat; DOCX dianggap
+# gagal bila teksnya kurang dari PDF_DOCX_TEXT_RATIO kali teks PDF aslinya.
+PDF_MIN_CHARS_PER_PAGE = int(os.getenv("PDF_MIN_CHARS_PER_PAGE", "20"))
+PDF_HIDDEN_TEXT_RATIO = float(os.getenv("PDF_HIDDEN_TEXT_RATIO", "0.6"))
+PDF_DOCX_TEXT_RATIO = float(os.getenv("PDF_DOCX_TEXT_RATIO", "0.5"))
+
+# Pengaturan OCR untuk PDF hasil pindaian. OCR jauh lebih lambat daripada
+# konversi biasa (sekitar 2-3 detik per halaman), jadi batas waktunya dihitung
+# per halaman, bukan memakai PROCESS_TIMEOUT yang datar.
+OCR_DPI = int(os.getenv("OCR_DPI", "300"))
+OCR_LANGUAGE = os.getenv("OCR_LANGUAGE", "ind+eng")
+OCR_TIMEOUT_PER_PAGE = float(os.getenv("OCR_TIMEOUT_PER_PAGE", "15"))
+OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "300"))
 
 # Ekstensi yang bisa dibuka LibreOffice dan diekspor ke PDF
 OFFICE_INPUT_EXTENSIONS = {
@@ -261,30 +278,459 @@ class ConvertService:
     # PDF -> Office
     # ------------------------------------------------------------------
     @staticmethod
-    async def pdf_to_docx(input_path: str, output_path: str) -> bool:
-        """Konversi PDF ke DOCX memakai pdf2docx (layout jauh lebih terjaga dari LibreOffice)."""
+    def _analyze_pdf_text(input_path: str) -> dict:
+        """
+        Periksa lapisan teks PDF supaya mode konversi ke DOCX bisa dipilih.
+
+        PDF hasil pemindaian yang sudah di-OCR menyimpan teksnya sebagai teks
+        tak terlihat (render mode 3) di atas gambar halaman. pdf2docx secara
+        bawaan membuang teks semacam itu, sehingga DOCX-nya hanya berisi gambar
+        dan tidak bisa diedit. Hasil analisis ini yang menentukan penanganannya.
+        """
+        fitz = ConvertService._import_fitz()
+
+        document = fitz.open(input_path)
         try:
-            from pdf2docx import Converter
+            page_count = document.page_count or 1
+            total_chars = 0
+            visible_chars = 0
+            hidden_chars = 0
+
+            for page in document:
+                total_chars += len(page.get_text("text").strip())
+                try:
+                    spans = page.get_texttrace()
+                except Exception:
+                    # get_texttrace bisa gagal pada font rusak; abaikan halamannya
+                    continue
+
+                for span in spans:
+                    char_count = len(span.get("chars") or ())
+                    if span.get("type") == 3:
+                        hidden_chars += char_count
+                    else:
+                        visible_chars += char_count
+        finally:
+            document.close()
+
+        traced = visible_chars + hidden_chars
+        return {
+            "pages": page_count,
+            "chars": total_chars,
+            "chars_per_page": total_chars / page_count,
+            "hidden_ratio": (hidden_chars / traced) if traced else 0.0,
+        }
+
+    @staticmethod
+    def _docx_text_length(path: str) -> int:
+        """Hitung panjang teks yang benar-benar bisa diedit di dalam DOCX."""
+        try:
+            from docx import Document
+        except ImportError:
+            # Tanpa python-docx hasilnya tidak bisa diverifikasi; anggap lolos
+            return -1
+
+        def paragraphs_length(paragraphs) -> int:
+            return sum(len(paragraph.text.strip()) for paragraph in paragraphs)
+
+        try:
+            document = Document(path)
+        except Exception:
+            return 0
+
+        total = paragraphs_length(document.paragraphs)
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    total += paragraphs_length(cell.paragraphs)
+        return total
+
+    @staticmethod
+    def _run_pdf2docx(input_path: str, output_path: str, ocr_mode: int) -> None:
+        """
+        Jalankan pdf2docx dengan mode lapisan teks tertentu.
+
+        ocr_mode 0 memakai teks yang terlihat (PDF digital biasa), ocr_mode 2
+        memakai teks tak terlihat hasil OCR dan mengabaikan gambar halaman.
+        """
+        from pdf2docx import Converter
+
+        converter = Converter(input_path)
+        try:
+            converter.convert(output_path, start=0, end=None, ocr=ocr_mode)
+        finally:
+            converter.close()
+
+    @staticmethod
+    def _build_docx_from_pdf_text(input_path: str, output_path: str) -> None:
+        """
+        Bangun DOCX langsung dari span teks PDF memakai python-docx.
+
+        Cadangan terakhir ketika pdf2docx gagal menghasilkan teks: layout kolom
+        dan tabel tidak dipertahankan, tapi seluruh isinya dijamin berupa teks
+        yang bisa diedit, lengkap dengan ukuran huruf, tebal, dan miringnya.
+        """
+        fitz = ConvertService._import_fitz()
+        from docx import Document
+        from docx.shared import Pt
+
+        document = fitz.open(input_path)
+        docx_document = Document()
+        try:
+            for page_index, page in enumerate(document):
+                if page_index:
+                    docx_document.add_page_break()
+
+                for block in page.get_text("dict").get("blocks", []):
+                    if block.get("type") != 0:  # 0 = blok teks
+                        continue
+
+                    lines = block.get("lines") or []
+                    if not any(
+                        span.get("text", "").strip()
+                        for line in lines
+                        for span in line.get("spans") or ()
+                    ):
+                        continue
+
+                    paragraph = docx_document.add_paragraph()
+                    for line_index, line in enumerate(lines):
+                        if line_index:
+                            paragraph.add_run(" ")
+                        for span in line.get("spans") or ():
+                            text = span.get("text", "")
+                            if not text:
+                                continue
+                            run = paragraph.add_run(text)
+                            size = span.get("size")
+                            if size:
+                                run.font.size = Pt(round(float(size), 1))
+                            flags = span.get("flags", 0)
+                            run.bold = bool(flags & 2 ** 4)
+                            run.italic = bool(flags & 2 ** 1)
+
+            docx_document.save(output_path)
+        finally:
+            document.close()
+
+    _ocr_reader = None
+    _ocr_reader_lock = threading.Lock()
+
+    @staticmethod
+    def _load_ocr_reader():
+        """
+        Ambil mesin OCR yang tersedia, atau None kalau tidak ada satu pun.
+
+        Dikembalikan sebagai fungsi yang menerima PNG halaman dan mengembalikan
+        daftar baris teks sesuai urutan baca. RapidOCR dipakai lebih dulu karena
+        cukup dipasang lewat pip (memakai onnxruntime yang sudah jadi dependensi),
+        sedangkan Tesseract butuh binary sistem.
+
+        Hasilnya di-cache karena memuat model ONNX makan waktu beberapa detik;
+        tanpa cache ongkos itu dibayar ulang tiap konversi.
+        """
+        if ConvertService._ocr_reader is not None:
+            return ConvertService._ocr_reader or None
+
+        with ConvertService._ocr_reader_lock:
+            if ConvertService._ocr_reader is None:
+                ConvertService._ocr_reader = ConvertService._build_ocr_reader() or False
+        return ConvertService._ocr_reader or None
+
+    @staticmethod
+    def _build_ocr_reader():
+        """
+        Siapkan pembaca OCR dari mesin pertama yang terpasang.
+
+        Pembaca menerima PNG halaman dan mengembalikan daftar dict berisi
+        ``text`` dan ``bbox`` (x0, y0, x1, y1 dalam piksel gambar). Kotaknya ikut
+        dikembalikan karena fitur "PDF bisa dicari" perlu menempatkan teks tak
+        terlihat tepat di atas tulisan aslinya, bukan sekadar tahu isinya.
+        """
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except ImportError:
+            pass
+        else:
+            engine = RapidOCR()
+
+            def read_with_rapidocr(image_bytes: bytes) -> list:
+                # use_cls=False: klasifikator sudut kadang membalik baris yang
+                # sebenarnya sudah tegak sehingga isinya rusak. Halaman di sini
+                # selalu dirender dari PDF (rotasi halaman sudah diterapkan
+                # PyMuPDF), jadi orientasinya dijamin benar dan pemeriksaan itu
+                # hanya menambah risiko sekaligus memperlambat.
+                result, _ = engine(image_bytes, use_cls=False)
+                if not result:
+                    return []
+
+                # Tiap entri: [4 titik kotak, teks, skor]
+                items = []
+                for box, text, *_ in result:
+                    text = str(text)
+                    if not text.strip():
+                        continue
+                    xs = [point[0] for point in box]
+                    ys = [point[1] for point in box]
+                    items.append(
+                        {
+                            "text": text,
+                            "bbox": (min(xs), min(ys), max(xs), max(ys)),
+                        }
+                    )
+                return items
+
+            return read_with_rapidocr
+
+        try:
+            import io
+
+            import pytesseract
+            from PIL import Image
+        except ImportError:
+            return None
+
+        def read_with_tesseract(image_bytes: bytes) -> list:
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                data = pytesseract.image_to_data(
+                    image, lang=OCR_LANGUAGE, output_type=pytesseract.Output.DICT
+                )
+
+            items = []
+            for index, text in enumerate(data["text"]):
+                if not text.strip():
+                    continue
+                left = data["left"][index]
+                top = data["top"][index]
+                items.append(
+                    {
+                        "text": text,
+                        "bbox": (
+                            left,
+                            top,
+                            left + data["width"][index],
+                            top + data["height"][index],
+                        ),
+                    }
+                )
+            return items
+
+        return read_with_tesseract
+
+    @staticmethod
+    def _require_ocr_reader():
+        """Ambil pembaca OCR, atau tolak permintaan dengan pesan yang jelas."""
+        reader = ConvertService._load_ocr_reader()
+        if reader is None:
+            # ValueError agar endpoint membalas 400: ini kondisi dokumen,
+            # bukan kegagalan server
+            raise ValueError(
+                "PDF ini hasil pindaian dan tidak punya lapisan teks, jadi isinya "
+                "harus dikenali lewat OCR. Fitur OCR belum aktif di server ini."
+            )
+        return reader
+
+    @staticmethod
+    def _guard_ocr_page_count(page_count: int) -> None:
+        """Tolak dokumen pindaian yang terlalu panjang untuk di-OCR."""
+        if page_count > OCR_MAX_PAGES:
+            raise ValueError(
+                f"PDF ini hasil pindaian dengan {page_count} halaman, terlalu panjang "
+                f"untuk dikenali lewat OCR (batas {OCR_MAX_PAGES} halaman). "
+                "Pecah dokumennya lebih dulu."
+            )
+
+    @staticmethod
+    def _ocr_timeout(page_count: int) -> float:
+        """Batas waktu OCR dihitung per halaman karena jauh lebih lambat."""
+        return max(PROCESS_TIMEOUT, page_count * OCR_TIMEOUT_PER_PAGE)
+
+    @staticmethod
+    def _ocr_page_items(page, reader) -> list:
+        """
+        Kenali isi satu halaman, lengkap dengan kotak dalam satuan titik PDF.
+
+        Halaman dirender pada OCR_DPI lalu koordinat piksel dikembalikan ke
+        satuan halaman, sehingga kotaknya bisa langsung dipakai untuk menaruh
+        teks di posisi yang sama.
+        """
+        pixmap = page.get_pixmap(dpi=OCR_DPI)
+        items = reader(pixmap.tobytes("png"))
+
+        scale = 72.0 / OCR_DPI
+        for item in items:
+            x0, y0, x1, y1 = item["bbox"]
+            item["bbox"] = (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
+        return items
+
+    @staticmethod
+    def _ocr_page_lines(page, reader) -> list:
+        """
+        Render satu halaman lalu kembalikan baris teks sesuai urutan baca.
+
+        Potongan yang tinggi tengahnya berdekatan digabung jadi satu baris,
+        supaya hasilnya terbaca sebagai kalimat, bukan serpihan lepas.
+        """
+        items = ConvertService._ocr_page_items(page, reader)
+        if not items:
+            return []
+
+        ordered = sorted(
+            items,
+            key=lambda item: ((item["bbox"][1] + item["bbox"][3]) / 2, item["bbox"][0]),
+        )
+
+        lines: list = []
+        current: list = []
+        current_y = None
+        for item in ordered:
+            x0, y0, x1, y1 = item["bbox"]
+            center_y = (y0 + y1) / 2
+            height = max(y1 - y0, 1)
+            if current_y is not None and abs(center_y - current_y) > height * 0.6:
+                lines.append(" ".join(current))
+                current = []
+                current_y = None
+            current.append(item["text"])
+            if current_y is None:
+                current_y = center_y
+
+        if current:
+            lines.append(" ".join(current))
+        return lines
+
+    @staticmethod
+    def _ocr_pdf_to_docx(
+        input_path: str, output_path: str, progress: Optional[Callable] = None
+    ) -> None:
+        """
+        Kenali teks dari PDF hasil pindaian lalu tulis ke DOCX.
+
+        Dipakai saat PDF sama sekali tidak punya lapisan teks, jadi satu-satunya
+        cara menghasilkan Word yang bisa diedit adalah membaca gambar halamannya.
+        """
+        reader = ConvertService._require_ocr_reader()
+
+        fitz = ConvertService._import_fitz()
+        from docx import Document
+
+        document = fitz.open(input_path)
+        docx_document = Document()
+        try:
+            total_pages = document.page_count
+            for page_index, page in enumerate(document):
+                if page_index:
+                    docx_document.add_page_break()
+
+                for line in ConvertService._ocr_page_lines(page, reader):
+                    docx_document.add_paragraph(line)
+
+                ConvertService._report_progress(progress, page_index + 1, total_pages)
+
+            docx_document.save(output_path)
+        finally:
+            document.close()
+
+    @staticmethod
+    def _report_progress(progress: Optional[Callable], done: int, total: int) -> None:
+        """
+        Laporkan kemajuan per halaman tanpa membiarkan errornya menggagalkan konversi.
+
+        Callback datang dari pemanggil (mis. job store) dan hanya bersifat
+        informatif, jadi kegagalannya tidak boleh membatalkan pekerjaan asli.
+        """
+        if progress is None:
+            return
+        try:
+            progress(done, total)
+        except Exception:
+            logger.debug("Callback progres gagal", exc_info=True)
+
+    @staticmethod
+    async def pdf_to_docx(
+        input_path: str, output_path: str, progress: Optional[Callable] = None
+    ) -> bool:
+        """
+        Konversi PDF ke DOCX dengan isi yang tetap bisa diedit.
+
+        pdf2docx dipakai lebih dulu karena layoutnya jauh lebih terjaga daripada
+        LibreOffice, tapi ia hanya membaca satu jenis lapisan teks sekaligus.
+        Karena itu modenya dipilih dari hasil analisis PDF, keluarannya diperiksa
+        ulang, dan kalau teksnya tetap kosong konversi dijatuhkan ke pembangun
+        DOCX berbasis teks (atau OCR untuk PDF hasil pindaian) supaya hasilnya
+        tidak pernah berupa gambar saja.
+        """
+        try:
+            import pdf2docx  # noqa: F401
         except ImportError:
             logger.error("pdf2docx tidak terpasang")
             raise RuntimeError("Fitur PDF ke Word belum tersedia di server ini")
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+        # Analisis dilakukan di luar konversi karena hasilnya ikut menentukan
+        # batas waktu: jalur OCR butuh jauh lebih lama daripada pdf2docx.
+        try:
+            stats = await asyncio.to_thread(ConvertService._analyze_pdf_text, input_path)
+        except Exception as e:
+            logger.warning(f"Analisis lapisan teks PDF gagal, pakai mode standar: {e}")
+            stats = {"pages": 1, "chars": 0, "chars_per_page": 999.0, "hidden_ratio": 0.0}
+
+        needs_ocr = stats["chars_per_page"] < PDF_MIN_CHARS_PER_PAGE
+        if needs_ocr:
+            ConvertService._guard_ocr_page_count(stats["pages"])
+
+        timeout = (
+            ConvertService._ocr_timeout(stats["pages"]) if needs_ocr else PROCESS_TIMEOUT
+        )
+
         def perform_conversion():
-            converter = Converter(input_path)
-            try:
-                converter.convert(output_path, start=0, end=None)
-            finally:
-                converter.close()
+            # Tanpa lapisan teks sama sekali hanya OCR yang bisa menolong
+            if needs_ocr:
+                logger.info(
+                    f"PDF terdeteksi hasil pindaian ({stats['pages']} halaman), "
+                    "konversi lewat OCR"
+                )
+                ConvertService._ocr_pdf_to_docx(input_path, output_path, progress)
+                return
+
+            # Teks tersembunyi mendominasi berarti PDF pindaian yang sudah di-OCR:
+            # pdf2docx harus diminta membaca lapisan itu (ocr=2), kalau tidak yang
+            # tersisa hanya gambar halaman.
+            primary_mode = 2 if stats["hidden_ratio"] >= PDF_HIDDEN_TEXT_RATIO else 0
+            modes = [primary_mode, 0 if primary_mode == 2 else 2]
+            minimum_chars = max(1, int(stats["chars"] * PDF_DOCX_TEXT_RATIO))
+
+            for mode in modes:
+                try:
+                    ConvertService._run_pdf2docx(input_path, output_path, mode)
+                except Exception as e:
+                    logger.warning(f"pdf2docx gagal pada mode ocr={mode}: {e}")
+                    continue
+
+                extracted = ConvertService._docx_text_length(output_path)
+                if extracted < 0 or extracted >= minimum_chars:
+                    return
+
+                logger.warning(
+                    f"DOCX dari pdf2docx mode ocr={mode} cuma berisi {extracted} karakter "
+                    f"(PDF punya {stats['chars']}), coba mode lain"
+                )
+
+            # pdf2docx tetap tidak menghasilkan teks memadai: susun ulang dari span
+            # teks PDF supaya isinya dijamin bisa diedit
+            logger.info("Membangun DOCX langsung dari teks PDF sebagai cadangan")
+            ConvertService._build_docx_from_pdf_text(input_path, output_path)
 
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+                asyncio.to_thread(perform_conversion), timeout=timeout
             )
         except asyncio.TimeoutError:
-            logger.error("PDF ke DOCX timeout")
+            logger.error(f"PDF ke DOCX timeout setelah {timeout:.0f}s")
             return False
+        except (ValueError, RuntimeError):
+            raise
         except Exception as e:
             logger.error(f"Error saat konversi PDF ke DOCX: {e}", exc_info=True)
             return False
@@ -292,10 +738,16 @@ class ConvertService:
         return os.path.exists(output_path)
 
     @staticmethod
-    async def pdf_to_xlsx(input_path: str, output_path: str) -> bool:
+    async def pdf_to_xlsx(
+        input_path: str, output_path: str, progress: Optional[Callable] = None
+    ) -> bool:
         """
         Ekstrak tabel dari PDF ke XLSX (satu sheet per tabel).
+
         LibreOffice tidak mendukung arah ini, jadi dipakai deteksi tabel PyMuPDF.
+        Bila tak ada tabel, isinya dijatuhkan ke teks per baris; untuk PDF hasil
+        pindaian teks itu diambil lewat OCR supaya keluarannya tidak berupa buku
+        kerja kosong yang tetap dilaporkan sukses.
         """
         fitz = ConvertService._import_fitz()
         try:
@@ -306,6 +758,14 @@ class ConvertService:
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+        stats = await asyncio.to_thread(ConvertService._analyze_pdf_text, input_path)
+        needs_ocr = stats["chars_per_page"] < PDF_MIN_CHARS_PER_PAGE
+        if needs_ocr:
+            ConvertService._guard_ocr_page_count(stats["pages"])
+        timeout = (
+            ConvertService._ocr_timeout(stats["pages"]) if needs_ocr else PROCESS_TIMEOUT
+        )
+
         def perform_conversion():
             document = fitz.open(input_path)
             workbook = Workbook()
@@ -313,6 +773,7 @@ class ConvertService:
             table_count = 0
 
             try:
+                total_pages = document.page_count
                 for page_index, page in enumerate(document, start=1):
                     try:
                         tables = page.find_tables()
@@ -336,12 +797,29 @@ class ConvertService:
                                 ["" if cell is None else str(cell) for cell in row]
                             )
 
+                    ConvertService._report_progress(progress, page_index, total_pages)
+
                 # Tidak ada tabel terdeteksi: jatuhkan ke teks per baris agar hasil tetap berguna
                 if table_count == 0:
+                    reader = ConvertService._require_ocr_reader() if needs_ocr else None
                     sheet = workbook.create_sheet("Teks")
                     for page_index, page in enumerate(document, start=1):
-                        for line in page.get_text("text").splitlines():
+                        lines = page.get_text("text").splitlines()
+                        if not any(line.strip() for line in lines) and reader is not None:
+                            lines = ConvertService._ocr_page_lines(page, reader)
+
+                        for line in lines:
                             sheet.append([f"Hal {page_index}", line])
+
+                        ConvertService._report_progress(progress, page_index, total_pages)
+
+                    if sheet.max_row <= 1 and sheet["A1"].value is None:
+                        # ValueError agar endpoint membalas 400: ini kondisi dokumen,
+                        # bukan kegagalan server
+                        raise ValueError(
+                            "Tidak ada tabel maupun teks yang bisa diambil dari PDF ini. "
+                            "Kalau dokumennya hasil pindaian, aktifkan OCR di server."
+                        )
 
                 workbook.save(output_path)
             finally:
@@ -349,11 +827,13 @@ class ConvertService:
 
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+                asyncio.to_thread(perform_conversion), timeout=timeout
             )
         except asyncio.TimeoutError:
-            logger.error("PDF ke XLSX timeout")
+            logger.error(f"PDF ke XLSX timeout setelah {timeout:.0f}s")
             return False
+        except (ValueError, RuntimeError):
+            raise
         except Exception as e:
             logger.error(f"Error saat konversi PDF ke XLSX: {e}", exc_info=True)
             return False
@@ -566,14 +1046,31 @@ class ConvertService:
         output_path: str,
         text_format: str = "txt",
         pages: Optional[str] = None,
+        progress: Optional[Callable] = None,
     ) -> bool:
-        """Ekstrak isi PDF menjadi .txt atau .md."""
+        """
+        Ekstrak isi PDF menjadi .txt atau .md.
+
+        PDF hasil pindaian tidak punya teks yang bisa diambil, jadi halaman yang
+        kosong dikenali lewat OCR. Tanpa itu keluarannya berupa berkas nol byte
+        yang tetap dilaporkan sukses.
+        """
         fitz = ConvertService._import_fitz()
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+        stats = await asyncio.to_thread(ConvertService._analyze_pdf_text, input_path)
+        needs_ocr = stats["chars_per_page"] < PDF_MIN_CHARS_PER_PAGE
+        if needs_ocr:
+            ConvertService._guard_ocr_page_count(stats["pages"])
+        timeout = (
+            ConvertService._ocr_timeout(stats["pages"]) if needs_ocr else PROCESS_TIMEOUT
+        )
+
         def perform_conversion():
-            if text_format == "md":
-                # pymupdf4llm menghasilkan Markdown yang jauh lebih rapi bila tersedia
+            # pymupdf4llm menghasilkan Markdown yang jauh lebih rapi bila tersedia,
+            # tapi ia sama-sama bergantung pada lapisan teks sehingga dilewati untuk
+            # dokumen pindaian
+            if text_format == "md" and not needs_ocr:
                 try:
                     import pymupdf4llm
 
@@ -585,18 +1082,32 @@ class ConvertService:
                         "pymupdf4llm tidak tersedia, memakai ekstraksi Markdown sederhana"
                     )
 
+            reader = ConvertService._require_ocr_reader() if needs_ocr else None
+
             document = fitz.open(input_path)
             try:
                 selected = parse_page_ranges(pages, document.page_count)
                 blocks: list[str] = []
 
-                for page_index in selected:
+                for position, page_index in enumerate(selected, start=1):
                     page = document.load_page(page_index)
                     text = page.get_text("text").strip()
+                    if not text and reader is not None:
+                        lines = ConvertService._ocr_page_lines(page, reader)
+                        text = "\n".join(lines).strip()
+
                     if text_format == "md":
                         blocks.append(f"## Halaman {page_index + 1}\n\n{text}")
                     else:
                         blocks.append(text)
+
+                    ConvertService._report_progress(progress, position, len(selected))
+
+                if not any(block.strip() for block in blocks):
+                    raise ValueError(
+                        "Tidak ada teks yang bisa diambil dari PDF ini. Kalau "
+                        "dokumennya hasil pindaian, aktifkan OCR di server."
+                    )
 
                 separator = "\n\n---\n\n" if text_format == "md" else "\n\n\f\n\n"
                 Path(output_path).write_text(separator.join(blocks), encoding="utf-8")
@@ -605,11 +1116,13 @@ class ConvertService:
 
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+                asyncio.to_thread(perform_conversion), timeout=timeout
             )
         except asyncio.TimeoutError:
-            logger.error("Ekstraksi teks PDF timeout")
+            logger.error(f"Ekstraksi teks PDF timeout setelah {timeout:.0f}s")
             return False
+        except (ValueError, RuntimeError):
+            raise
         except Exception as e:
             logger.error(f"Error saat ekstraksi teks PDF: {e}", exc_info=True)
             return False
@@ -849,11 +1362,17 @@ class ConvertService:
 
     @staticmethod
     async def pdf_to_epub(
-        input_path: str, output_path: str, title: Optional[str] = None
+        input_path: str,
+        output_path: str,
+        title: Optional[str] = None,
+        progress: Optional[Callable] = None,
     ) -> bool:
         """
         Bangun EPUB dari teks PDF (satu bab per halaman).
+
         Layout kompleks tidak dipertahankan - EPUB memang format teks mengalir.
+        Halaman tanpa teks dikenali lewat OCR; tanpa itu PDF hasil pindaian
+        menghasilkan EPUB berisi bab-bab kosong yang tetap dilaporkan sukses.
         """
         fitz = ConvertService._import_fitz()
         try:
@@ -864,7 +1383,16 @@ class ConvertService:
 
         import html as html_module
 
+        stats = await asyncio.to_thread(ConvertService._analyze_pdf_text, input_path)
+        needs_ocr = stats["chars_per_page"] < PDF_MIN_CHARS_PER_PAGE
+        if needs_ocr:
+            ConvertService._guard_ocr_page_count(stats["pages"])
+        timeout = (
+            ConvertService._ocr_timeout(stats["pages"]) if needs_ocr else PROCESS_TIMEOUT
+        )
+
         def perform_conversion():
+            reader = ConvertService._require_ocr_reader() if needs_ocr else None
             document = fitz.open(input_path)
             try:
                 book = epub.EpubBook()
@@ -873,8 +1401,15 @@ class ConvertService:
                 book.set_language("id")
 
                 chapters = []
+                total_pages = document.page_count
+                has_text = False
                 for page_index, page in enumerate(document, start=1):
                     text = page.get_text("text").strip()
+                    if not text and reader is not None:
+                        text = "\n\n".join(
+                            ConvertService._ocr_page_lines(page, reader)
+                        ).strip()
+                    has_text = has_text or bool(text)
                     paragraphs = (
                         "".join(
                             f"<p>{html_module.escape(block)}</p>"
@@ -892,6 +1427,16 @@ class ConvertService:
                     chapter.content = f"<h2>Halaman {page_index}</h2>{paragraphs}"
                     book.add_item(chapter)
                     chapters.append(chapter)
+                    ConvertService._report_progress(progress, page_index, total_pages)
+
+                if not has_text:
+                    # ValueError agar endpoint membalas 400: ini kondisi dokumen,
+                    # bukan kegagalan server
+                    raise ValueError(
+                        "Tidak ada teks yang bisa diambil dari PDF ini, jadi EPUB-nya "
+                        "akan kosong. Kalau dokumennya hasil pindaian, aktifkan OCR "
+                        "di server."
+                    )
 
                 book.toc = tuple(chapters)
                 book.add_item(epub.EpubNcx())
@@ -904,11 +1449,13 @@ class ConvertService:
 
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(perform_conversion), timeout=PROCESS_TIMEOUT
+                asyncio.to_thread(perform_conversion), timeout=timeout
             )
         except asyncio.TimeoutError:
-            logger.error("PDF ke EPUB timeout")
+            logger.error(f"PDF ke EPUB timeout setelah {timeout:.0f}s")
             return False
+        except (ValueError, RuntimeError):
+            raise
         except Exception as e:
             logger.error(f"Error saat konversi PDF ke EPUB: {e}", exc_info=True)
             return False
